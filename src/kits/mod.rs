@@ -57,6 +57,15 @@ impl KitsModule {
         }
     }
 
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::KitsConfig>) -> Self {
+        Self {
+            storage,
+            kits: Arc::new(DashMap::new()),
+            cooldowns: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     pub async fn load_kits(&self) -> Result<()> {
         let keys = self.storage.keys("kits", "%").await?;
         for key in keys {

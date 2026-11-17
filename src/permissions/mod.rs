@@ -62,6 +62,16 @@ impl PermissionsModule {
         }
     }
 
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::PermissionsConfig>) -> Self {
+        Self {
+            storage,
+            users: Arc::new(DashMap::new()),
+            groups: Arc::new(DashMap::new()),
+            tracks: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     pub async fn load_data(&self) -> Result<()> {
         for key in self.storage.keys("users", "%").await? {
             if let Some(data) = self.storage.get("users", &key).await? {
@@ -142,7 +152,7 @@ impl PermissionsModule {
                     }
                 }
                 if !self.contexts_match(&perm.context, contexts) {
-                    continue;
+                    return false;
                 }
                 return true;
             }

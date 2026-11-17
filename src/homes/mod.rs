@@ -34,6 +34,14 @@ impl HomesModule {
         }
     }
 
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::HomesConfig>) -> Self {
+        Self {
+            storage,
+            cache: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     fn cache_key(&self, uuid: Uuid, name: &str) -> String {
         format!("{}:{}", uuid, name.to_lowercase())
     }

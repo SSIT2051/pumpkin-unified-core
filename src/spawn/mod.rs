@@ -2,7 +2,7 @@ use crate::storage::StorageBackend;
 use crate::utils::macros::*;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +17,7 @@ pub struct SpawnData {
 
 pub struct SpawnModule {
     storage: Arc<StorageBackend>,
-    spawn: Option<SpawnData>,
+    spawn: Arc<RwLock<Option<SpawnData>>>,
     config: Arc<crate::config::SpawnConfig>,
 }
 
@@ -26,17 +26,25 @@ impl SpawnModule {
         let config = Arc::new(crate::config::Config::default().spawn);
         Self {
             storage,
-            spawn: None,
+            spawn: Arc::new(RwLock::new(None)),
             config,
         }
     }
 
-    pub async fn load_spawn(&mut self) -> Result<()> {
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::SpawnConfig>) -> Self {
+        Self {
+            storage,
+            spawn: Arc::new(RwLock::new(None)),
+            config,
+        }
+    }
+
+    pub async fn load_spawn(&self) -> Result<()> {
         if let Some(data) = self.storage.get("spawn", "main").await? {
             let spawn_data: crate::storage::SerializedData<SpawnData> = crate::storage::SerializedData::deserialize(&data)?;
-            self.spawn = Some(spawn_data.data);
+            *self.spawn.write().unwrap() = Some(spawn_data.data);
         } else if let Some(loc) = &self.config.spawn_location {
-            self.spawn = Some(SpawnData {
+            *self.spawn.write().unwrap() = Some(SpawnData {
                 world: loc.world.clone(),
                 x: loc.x,
                 y: loc.y,
@@ -48,18 +56,28 @@ impl SpawnModule {
         Ok(())
     }
 
-    pub async fn set_spawn(&mut self, spawn: SpawnData) -> Result<()> {
+    pub async fn set_spawn(&self, spawn: SpawnData) -> Result<()> {
         let data = crate::storage::SerializedData::new(spawn.clone()).serialize()?;
         self.storage.set("spawn", "main", &data).await?;
-        self.spawn = Some(spawn);
+        *self.spawn.write().unwrap() = Some(spawn);
         Ok(())
     }
 
     pub fn get_spawn(&self) -> Option<SpawnData> {
-        self.spawn.clone()
+        self.spawn.read().unwrap().clone()
     }
 
     pub fn register_commands(&self, context: &mut pumpkin_plugin_api::context::Context) {
         crate::spawn::commands::register(self.clone(), context);
+    }
+}
+
+impl Clone for SpawnModule {
+    fn clone(&self) -> Self {
+        Self {
+            storage: self.storage.clone(),
+            spawn: self.spawn.clone(),
+            config: self.config.clone(),
+        }
     }
 }

@@ -44,8 +44,7 @@ pub fn register(module: Arc<SpawnModule>, context: &mut Context) {
                 pitch: location.pitch,
             };
             
-            let module_mut = unsafe { &mut *(Arc::as_ptr(&module_clone) as *mut SpawnModule) };
-            module_mut.set_spawn(spawn).await?;
+            module_clone.set_spawn(spawn).await?;
             sender.send_message(&format_text("&aSpawn point set"));
             Ok(())
         }))

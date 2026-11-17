@@ -17,6 +17,10 @@ impl UtilityModule {
         Self { config }
     }
 
+    pub fn with_config(config: Arc<crate::config::UtilityConfig>) -> Self {
+        Self { config }
+    }
+
     pub fn register_commands(&self, context: &mut Context) {
         crate::utility::commands::register(Arc::new(self.clone()), context);
     }

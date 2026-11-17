@@ -62,14 +62,23 @@ macro_rules! format_message {
 
 #[macro_export]
 macro_rules! async_handler {
-    ($handler:expr) => {{
+    ($handler:expr) => {
         move |sender, server, args| {
-            let handler = $handler.clone();
+            let handler = $handler;
             Box::pin(async move {
                 handler(sender, server, args).await
-            }) as Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send>
+            }) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send>>
         }
-    }};
+    };
+}
+
+#[macro_export]
+macro_rules! async_handler_owned {
+    ($handler:expr) => {
+        Box::pin(async move {
+            $handler.await
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send>>
+    };
 }
 
 pub use register_command;

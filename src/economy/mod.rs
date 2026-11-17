@@ -52,6 +52,14 @@ impl EconomyModule {
         }
     }
 
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::EconomyConfig>) -> Self {
+        Self {
+            storage,
+            cache: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     pub async fn get_balance(&self, uuid: Uuid) -> Result<f64> {
         if let Some(cached) = self.cache.get(&uuid) {
             return Ok(cached.balance);

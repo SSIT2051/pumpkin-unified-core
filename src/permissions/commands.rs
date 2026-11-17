@@ -6,6 +6,7 @@ use pumpkin_plugin_api::{
     context::Context,
     server::Server,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -76,7 +77,13 @@ pub fn register(module: Arc<PermissionsModule>, context: &mut Context) {
                                         .or_else(|| Uuid::parse_str(target_name).ok())
                                         .ok_or_else(|| anyhow::anyhow!("User not found: {}", target_name))?;
                                     
-                                    let mut user = module.get_user(uuid).unwrap_or_default();
+                                    let mut user = module.get_user(uuid).unwrap_or_else(|| crate::permissions::UserData {
+                                        uuid,
+                                        name: String::new(),
+                                        permissions: vec![],
+                                        groups: vec![],
+                                        metadata: HashMap::new(),
+                                    });
                                     user.permissions.retain(|p| p.node != permission);
                                     let data = crate::storage::SerializedData::new(user.clone()).serialize()?;
                                     module.storage.set("users", &uuid.to_string(), &data).await?;
@@ -157,17 +164,4 @@ pub fn register(module: Arc<PermissionsModule>, context: &mut Context) {
         )
         .build();
     context.register_command(lp_cmd);
-}
-
-use std::collections::HashMap;
-impl Default for crate::permissions::UserData {
-    fn default() -> Self {
-        Self {
-            uuid: Uuid::nil(),
-            name: String::new(),
-            permissions: vec![],
-            groups: vec![],
-            metadata: HashMap::new(),
-        }
-    }
 }

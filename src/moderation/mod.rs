@@ -59,6 +59,16 @@ impl ModerationModule {
         }
     }
 
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::ModerationConfig>) -> Self {
+        Self {
+            storage,
+            bans: Arc::new(DashMap::new()),
+            mutes: Arc::new(DashMap::new()),
+            jails: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     pub async fn load_data(&self) -> Result<()> {
         for key in self.storage.keys("bans", "%").await? {
             if let Some(data) = self.storage.get("bans", &key).await? {
@@ -88,15 +98,21 @@ impl ModerationModule {
     }
 
     pub fn is_banned(&self, uuid: Uuid) -> Option<BanEntry> {
-        self.bans.get(&uuid).filter(|b| b.active && b.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())).map(|b| b.clone())
+        self.bans.get(&uuid).filter(|b| {
+            b.active && b.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())
+        }).map(|b| b.clone())
     }
 
     pub fn is_muted(&self, uuid: Uuid) -> Option<MuteEntry> {
-        self.mutes.get(&uuid).filter(|m| m.active && m.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())).map(|m| m.clone())
+        self.mutes.get(&uuid).filter(|m| {
+            m.active && m.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())
+        }).map(|m| m.clone())
     }
 
     pub fn is_jailed(&self, uuid: Uuid) -> Option<JailEntry> {
-        self.jails.get(&uuid).filter(|j| j.active && j.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())).map(|j| j.clone())
+        self.jails.get(&uuid).filter(|j| {
+            j.active && j.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())
+        }).map(|j| j.clone())
     }
 
     pub async fn ban(&self, target: Uuid, name: String, reason: String, by: Uuid, duration: Option<u64>) -> Result<()> {

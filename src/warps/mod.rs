@@ -35,6 +35,14 @@ impl WarpsModule {
         }
     }
 
+    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::WarpsConfig>) -> Self {
+        Self {
+            storage,
+            cache: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     pub async fn get_warp(&self, name: &str) -> Result<Option<Warp>> {
         if let Some(cached) = self.cache.get(name) {
             return Ok(Some(cached.clone()));

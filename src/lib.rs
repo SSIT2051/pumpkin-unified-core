@@ -63,17 +63,17 @@ impl Plugin for UnifiedPlugin {
         let config = Arc::new(Config::load());
         let storage = Arc::new(StorageManager::new(&config));
         
-        let economy = Arc::new(EconomyModule::new(storage.clone()));
-        let warps = Arc::new(WarpsModule::new(storage.clone()));
-        let homes = Arc::new(HomesModule::new(storage.clone()));
-        let tpa = Arc::new(TpaModule::new());
-        let kits = Arc::new(KitsModule::new(storage.clone()));
-        let moderation = Arc::new(ModerationModule::new(storage.clone()));
+        let economy = Arc::new(EconomyModule::with_config(storage.clone(), config.economy.clone()));
+        let warps = Arc::new(WarpsModule::with_config(storage.clone(), config.warps.clone()));
+        let homes = Arc::new(HomesModule::with_config(storage.clone(), config.homes.clone()));
+        let tpa = Arc::new(TpaModule::with_config(config.tpa.clone()));
+        let kits = Arc::new(KitsModule::with_config(storage.clone(), config.kits.clone()));
+        let moderation = Arc::new(ModerationModule::with_config(storage.clone(), config.moderation.clone()));
         let gamemode = Arc::new(GamemodeModule::new());
-        let permissions = Arc::new(PermissionsModule::new(storage.clone()));
-        let spawn = Arc::new(SpawnModule::new(storage.clone()));
-        let utility = Arc::new(UtilityModule::new());
-        let chat = Arc::new(ChatModule::new());
+        let permissions = Arc::new(PermissionsModule::with_config(storage.clone(), config.permissions.clone()));
+        let spawn = Arc::new(SpawnModule::with_config(storage.clone(), config.spawn.clone()));
+        let utility = Arc::new(UtilityModule::with_config(config.utility.clone()));
+        let chat = Arc::new(ChatModule::new().with_permissions(permissions.clone()));
         let events = Arc::new(EventModule::new(
             economy.clone(),
             warps.clone(),
@@ -119,7 +119,11 @@ impl Plugin for UnifiedPlugin {
     fn on_load(&mut self, context: &mut Context) {
         tracing::info!("Loading pumpkin-unified-core...");
 
-        self.storage.init().expect("Failed to initialize storage");
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.storage.init().expect("Failed to initialize storage");
+            })
+        });
 
         self.economy.register_commands(context);
         self.warps.register_commands(context);

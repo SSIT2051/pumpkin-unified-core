@@ -39,8 +39,16 @@ impl TpaModule {
         }
     }
 
+    pub fn with_config(config: Arc<crate::config::TpaConfig>) -> Self {
+        Self {
+            requests: Arc::new(DashMap::new()),
+            toggles: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
     pub fn create_request(&self, from: Uuid, to: Uuid, request_type: TpaType) -> Result<()> {
-        if self.toggles.get(&to).copied().unwrap_or(false) {
+        if !self.toggles.get(&to).copied().unwrap_or(true) {
             return Err(anyhow::anyhow!("Player has TPA toggled off"));
         }
         

@@ -43,8 +43,8 @@ impl Storage for MysqlStorage {
 
     async fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>> {
         self.ensure_table(table).await?;
-        let row = sqlx::query("SELECT value FROM ? WHERE key = ?")
-            .bind(table)
+        let sql = format!("SELECT value FROM {} WHERE key = ?", table);
+        let row = sqlx::query(&sql)
             .bind(key)
             .fetch_optional(self.pool.as_ref())
             .await?;
@@ -55,11 +55,12 @@ impl Storage for MysqlStorage {
     async fn set(&self, table: &str, key: &str, value: &[u8]) -> Result<()> {
         self.ensure_table(table).await?;
         let timestamp = chrono::Utc::now().timestamp();
-        sqlx::query(
-            "INSERT INTO ? (key, value, updated_at) VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)"
-        )
-        .bind(table)
+        let sql = format!(
+            "INSERT INTO {} (key, value, updated_at) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)",
+            table
+        );
+        sqlx::query(&sql)
         .bind(key)
         .bind(value)
         .bind(timestamp)
@@ -70,8 +71,8 @@ impl Storage for MysqlStorage {
 
     async fn delete(&self, table: &str, key: &str) -> Result<()> {
         self.ensure_table(table).await?;
-        sqlx::query("DELETE FROM ? WHERE key = ?")
-            .bind(table)
+        let sql = format!("DELETE FROM {} WHERE key = ?", table);
+        sqlx::query(&sql)
             .bind(key)
             .execute(self.pool.as_ref())
             .await?;
@@ -80,8 +81,8 @@ impl Storage for MysqlStorage {
 
     async fn exists(&self, table: &str, key: &str) -> Result<bool> {
         self.ensure_table(table).await?;
-        let row = sqlx::query("SELECT 1 FROM ? WHERE key = ? LIMIT 1")
-            .bind(table)
+        let sql = format!("SELECT 1 FROM {} WHERE key = ? LIMIT 1", table);
+        let row = sqlx::query(&sql)
             .bind(key)
             .fetch_optional(self.pool.as_ref())
             .await?;
@@ -91,12 +92,11 @@ impl Storage for MysqlStorage {
     async fn keys(&self, table: &str, pattern: &str) -> Result<Vec<String>> {
         self.ensure_table(table).await?;
         let sql = if pattern.contains('%') || pattern.contains('_') {
-            format!("SELECT key FROM ? WHERE key LIKE ?", table)
+            format!("SELECT key FROM {} WHERE key LIKE ?", table)
         } else {
-            format!("SELECT key FROM ? WHERE key = ?", table)
+            format!("SELECT key FROM {} WHERE key = ?", table)
         };
         let rows = sqlx::query(&sql)
-            .bind(table)
             .bind(pattern)
             .fetch_all(self.pool.as_ref())
             .await?;
