@@ -1,0 +1,9 @@
+[Unit]
+Description=Pumpkin Unified Core Cleanup
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/pumpkin-server/scripts/cleanup.sh
+User=root
+WorkingDirectory=/root/pumpkin-server

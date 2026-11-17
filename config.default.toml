@@ -1,0 +1,156 @@
+# pumpkin-unified-core Configuration
+# This file contains all configuration options for the plugin
+
+[storage]
+# Storage backend: "sqlite", "redis", "mysql", "postgres"
+backend = "sqlite"
+
+[storage.sqlite]
+# Path to SQLite database file
+path = "plugins/pumpkin-unified-core/data.db"
+# Maximum connections in pool
+max_connections = 10
+
+[storage.redis]
+# Redis connection URL
+url = "redis://127.0.0.1:6379"
+# Maximum connections in pool
+max_connections = 10
+
+[storage.mysql]
+# MySQL/PostgreSQL connection URL
+url = "mysql://user:pass@localhost/pumpkin"
+# Maximum connections in pool
+max_connections = 10
+
+[economy]
+# Starting balance for new players
+starting_balance = 100.0
+# Currency symbol
+currency_symbol = "$"
+# Currency format: {symbol} and {amount} are replaced
+currency_format = "{symbol}{amount}"
+# Maximum money a player can have
+max_money = 1000000000.0
+# Minimum money (can be negative for debt)
+min_money = 0.0
+# Log all transactions
+log_transactions = true
+
+[warps]
+# Maximum warps per player (0 = unlimited)
+max_warps_per_player = 10
+# Warp cooldown in seconds
+warp_cooldown = 5
+# Enable per-warp permissions
+per_warp_permissions = true
+
+[homes]
+# Maximum homes for default players
+max_homes_default = 3
+# Maximum homes for VIP players
+max_homes_vip = 10
+# Home cooldown in seconds
+home_cooldown = 5
+# Allow /home on death
+home_on_death = false
+
+[tpa]
+# TPA request timeout in seconds
+request_timeout = 30
+# Teleport cooldown in seconds
+teleport_cooldown = 5
+# Allow cross-world teleportation
+cross_world = true
+
+[kits]
+# Default kit cooldown in seconds (24 hours)
+default_cooldown = 86400
+# Enable kit signs
+kit_signs = true
+
+[moderation]
+# Ban message shown to banned players
+ban_message = "You have been banned from this server."
+# Mute message shown to muted players
+mute_message = "You have been muted."
+# Jail message shown to jailed players
+jail_message = "You have been jailed."
+# Jail location (optional)
+# jail_location = { world = "world", x = 0.0, y = 64.0, z = 0.0, yaw = 0.0, pitch = 0.0 }
+# Maximum tempban duration in seconds (30 days)
+max_tempban_duration = 2592000
+# Maximum tempmute duration in seconds (30 days)
+max_tempmute_duration = 2592000
+
+[gamemode]
+# Default gamemode
+default = "survival"
+
+[permissions]
+# Enable LuckPerms contexts
+enable_contexts = true
+# Default group for new players
+default_group = "default"
+
+[permissions.inheritance]
+# Maximum inheritance depth
+max_depth = 10
+# Inheritance order: "depth-first" or "breadth-first"
+order = "depth-first"
+
+# Example track configuration
+# [[permissions.tracks]]
+# name = "default"
+# groups = ["default", "vip", "moderator", "admin"]
+
+[spawn]
+# Spawn location (optional, auto-detected if not set)
+# spawn_location = { world = "world", x = 0.0, y = 64.0, z = 0.0, yaw = 0.0, pitch = 0.0 }
+# Respawn at home instead of spawn
+respawn_at_home = false
+# Prioritize bed spawn over default spawn
+bed_priority = true
+
+[utility]
+# AFK timeout in seconds (5 minutes)
+afk_timeout = 300
+# AFK kick timeout in seconds (optional, 0 = disabled)
+# afk_kick_timeout = 0
+# Message of the day
+motd = "Welcome to the server!"
+# Server rules
+rules = [
+    "Be respectful to other players",
+    "No cheating or hacking",
+    "No griefing or stealing",
+    "Follow staff instructions"
+]
+# Maximum players
+max_players = 20
+
+[chat]
+# Chat format: {player}, {message}, {group}, {prefix}, {suffix}
+format = "&8[&7{group}&8] &r{prefix}&r{player}&r: &f{message}"
+# Broadcast format
+broadcast_format = "&4[Broadcast] &r{message}"
+# Private message format
+private_message_format = "&8[&bPM&8] &r{from}&r -> &r{to}&r: &f{message}"
+# Chat radius in blocks (optional, null = global)
+# chat_radius = 100.0
+# Anti-spam enabled
+anti_spam = true
+# Spam threshold (messages per interval)
+spam_threshold = 5
+
+[events]
+# Player join message (optional, null = disabled)
+player_join_message = "&a{player} joined the game"
+# Player leave message (optional, null = disabled)
+player_leave_message = "&c{player} left the game"
+# Show death messages
+death_messages = true
+# Keep inventory on death
+keep_inventory = false
+# Anti-build protection
+anti_build = true

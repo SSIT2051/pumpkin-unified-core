@@ -1,0 +1,106 @@
+# pumpkin-unified-core Configuration (YAML)
+# This file contains all configuration options for the plugin
+
+storage:
+  backend: "sqlite"
+  sqlite:
+    path: "plugins/pumpkin-unified-core/data.db"
+    max_connections: 10
+  redis:
+    url: "redis://127.0.0.1:6379"
+    max_connections: 10
+  mysql:
+    url: "mysql://user:pass@localhost/pumpkin"
+    max_connections: 10
+
+economy:
+  starting_balance: 100.0
+  currency_symbol: "$"
+  currency_format: "{symbol}{amount}"
+  max_money: 1000000000.0
+  min_money: 0.0
+  log_transactions: true
+
+warps:
+  max_warps_per_player: 10
+  warp_cooldown: 5
+  per_warp_permissions: true
+
+homes:
+  max_homes_default: 3
+  max_homes_vip: 10
+  home_cooldown: 5
+  home_on_death: false
+
+tpa:
+  request_timeout: 30
+  teleport_cooldown: 5
+  cross_world: true
+
+kits:
+  default_cooldown: 86400
+  kit_signs: true
+
+moderation:
+  ban_message: "You have been banned from this server."
+  mute_message: "You have been muted."
+  jail_message: "You have been jailed."
+  # jail_location:
+  #   world: "world"
+  #   x: 0.0
+  #   y: 64.0
+  #   z: 0.0
+  #   yaw: 0.0
+  #   pitch: 0.0
+  max_tempban_duration: 2592000
+  max_tempmute_duration: 2592000
+
+gamemode:
+  default: "survival"
+
+permissions:
+  enable_contexts: true
+  default_group: "default"
+  inheritance:
+    max_depth: 10
+    order: "depth-first"
+  # tracks:
+  #   - name: "default"
+  #     groups: ["default", "vip", "moderator", "admin"]
+
+spawn:
+  # spawn_location:
+  #   world: "world"
+  #   x: 0.0
+  #   y: 64.0
+  #   z: 0.0
+  #   yaw: 0.0
+  #   pitch: 0.0
+  respawn_at_home: false
+  bed_priority: true
+
+utility:
+  afk_timeout: 300
+  # afk_kick_timeout: 0
+  motd: "Welcome to the server!"
+  rules:
+    - "Be respectful to other players"
+    - "No cheating or hacking"
+    - "No griefing or stealing"
+    - "Follow staff instructions"
+  max_players: 20
+
+chat:
+  format: "&8[&7{group}&8] &r{prefix}&r{player}&r: &f{message}"
+  broadcast_format: "&4[Broadcast] &r{message}"
+  private_message_format: "&8[&bPM&8] &r{from}&r -> &r{to}&r: &f{message}"
+  # chat_radius: 100.0
+  anti_spam: true
+  spam_threshold: 5
+
+events:
+  player_join_message: "&a{player} joined the game"
+  player_leave_message: "&c{player} left the game"
+  death_messages: true
+  keep_inventory: false
+  anti_build: true

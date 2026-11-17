@@ -1,0 +1,72 @@
+name: Auto-Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Fetch EssentialsX
+        run: |
+          git remote add essentialsx https://github.com/EssentialsX/Essentials.git 2>/dev/null || true
+          git fetch essentialsx main --depth=1
+      
+      - name: Fetch LuckPerms
+        run: |
+          git remote add luckperms https://github.com/LuckPerms/LuckPerms.git 2>/dev/null || true
+          git fetch luckperms main --depth=1
+      
+      - name: Check for changes
+        id: changes
+        run: |
+          ESSENTIALS_CHANGES=$(git log HEAD..essentialsx/main --oneline --name-only 2>/dev/null | head -20 || echo "no changes")
+          LUCKPERMS_CHANGES=$(git log HEAD..luckperms/main --oneline --name-only 2>/dev/null | head -20 || echo "no changes")
+          
+          echo "essentials_changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$ESSENTIALS_CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "luckperms_changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$LUCKPERMS_CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create PR if changes
+        if: steps.changes.outputs.essentials_changes != 'no changes' || steps.changes.outputs.luckperms_changes != 'no changes'
+        run: |
+          BRANCH="auto-sync-$(date +%s)"
+          git checkout -b $BRANCH
+          
+          echo "# Auto-sync from upstream" > SYNC_CHANGES.md
+          echo "" >> SYNC_CHANGES.md
+          echo "## EssentialsX Changes" >> SYNC_CHANGES.md
+          echo "${{ steps.changes.outputs.essentials_changes }}" >> SYNC_CHANGES.md
+          echo "" >> SYNC_CHANGES.md
+          echo "## LuckPerms Changes" >> SYNC_CHANGES.md
+          echo "${{ steps.changes.outputs.luckperms_changes }}" >> SYNC_CHANGES.md
+          
+          git add SYNC_CHANGES.md
+          git commit -m "chore: auto-sync upstream changes"
+          git push origin $BRANCH
+          
+          gh pr create --title "Auto-sync: upstream changes $(date +%Y-%m-%d)" \
+            --body-file SYNC_CHANGES.md \
+            --label "🤖-auto-sync" \
+            --base main
+      
+      - name: Label PR for verification
+        if: steps.changes.outputs.essentials_changes != 'no changes' || steps.changes.outputs.luckperms_changes != 'no changes'
+        run: |
+          PR_NUMBER=$(gh pr list --label "🤖-auto-sync" --json number --jq '.[0].number')
+          gh pr edit $PR_NUMBER --add-label "🤖-needs-verification"

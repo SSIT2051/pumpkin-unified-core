@@ -1,0 +1,38 @@
+name: Cleanup
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check disk usage
+        id: disk
+        run: |
+          USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+          echo "usage=$USAGE" >> $GITHUB_OUTPUT
+      
+      - name: Check memory usage
+        id: mem
+        run: |
+          USAGE=$(free | awk 'NR==2 {printf "%.0f", $3/$2 * 100}')
+          echo "usage=$USAGE" >> $GITHUB_OUTPUT
+      
+      - name: Cleanup if thresholds exceeded
+        if: steps.disk.outputs.usage > 85 || steps.mem.outputs.usage > 85
+        run: |
+          echo "Disk usage: ${{ steps.disk.outputs.usage }}%, Memory usage: ${{ steps.mem.outputs.usage }}%"
+          echo "Running cleanup..."
+          
+          find ~/.cargo/registry/cache -type f -mtime +7 -delete 2>/dev/null || true
+          find ~/.cargo/git/checkouts -type f -mtime +7 -delete 2>/dev/null || true
+          find /root/projects/pumpkin-unified/target -type f -mtime +7 -delete 2>/dev/null || true
+          find /tmp -name "cargo-*" -type f -mtime +7 -delete 2>/dev/null || true
+          find /tmp -name "rustc-*" -type f -mtime +7 -delete 2>/dev/null || true
+          
+          ls -t /root/pumpkin-server/plugins/pumpkin-unified-core.so.* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+          
+          echo "Cleanup completed"
