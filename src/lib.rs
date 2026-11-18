@@ -61,19 +61,19 @@ impl Plugin for UnifiedPlugin {
         
         // Initialize storage with configured backend
         let storage_backend = match config.storage.backend {
-            crate::config::StorageBackendConfig::Json => crate::storage::StorageBackend::Json,
-            crate::config::StorageBackendConfig::Sqlite => crate::storage::StorageBackend::Sqlite,
+            crate::config::StorageBackendConfig::Json => crate::storage::StorageBackendType::Json,
+            crate::config::StorageBackendConfig::Sqlite => crate::storage::StorageBackendType::Sqlite,
             crate::config::StorageBackendConfig::Redis => {
                 tracing::warn!("Redis backend not yet implemented, falling back to JSON");
-                crate::storage::StorageBackend::Json
+                crate::storage::StorageBackendType::Json
             }
             crate::config::StorageBackendConfig::Mysql => {
                 tracing::warn!("MySQL backend not yet implemented, falling back to JSON");
-                crate::storage::StorageBackend::Json
+                crate::storage::StorageBackendType::Json
             }
         };
         
-        let storage = Arc::new(crate::storage::Storage::new(&data_folder, storage_backend)?);
+        let storage = Arc::new(crate::storage::Storage::new(&data_folder, storage_backend).map_err(|e| e.to_string())?);
 
         let economy = Arc::new(Economy::new(storage.clone(), config.economy.clone()));
         let warps = Arc::new(Warps::new(storage.clone(), config.warps.clone()));

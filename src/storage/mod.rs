@@ -42,6 +42,18 @@ pub enum StorageError {
     Sqlite(#[from] rusqlite::Error),
 }
 
+impl From<String> for StorageError {
+    fn from(s: String) -> Self {
+        StorageError::Backend(s)
+    }
+}
+
+impl From<&str> for StorageError {
+    fn from(s: &str) -> Self {
+        StorageError::Backend(s.to_string())
+    }
+}
+
 pub type StorageResult<T> = Result<T, StorageError>;
 
 /// Trait for storage backends

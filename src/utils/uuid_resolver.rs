@@ -382,7 +382,7 @@ impl UuidResolver {
         };
         
         cache.insert(name.to_string(), cached.clone());
-        reverse_cache.insert(resolved.uuid.to_lowercase(), cached);
+        reverse_cache.insert(resolved.uuid.to_lowercase(), cached.clone());
         
         // Persist to storage
         let _ = self.storage.set("uuid_cache", name, &cached);
