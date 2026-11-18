@@ -1,6 +1,7 @@
 //! Offline player UUID resolution with Mojang API and local caching.
 
 use crate::storage::{Storage, StorageError, StorageResult};
+use pumpkin_plugin_api::Server;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -71,7 +72,7 @@ impl UuidResolver {
     }
 
     /// Resolve a player name to UUID (checks online players first, then cache, then Mojang API)
-    pub async fn resolve_name(&self, server: &crate::pumpkin_plugin_api::Server, name: &str) -> Option<ResolvedPlayer> {
+    pub async fn resolve_name(&self, server: &Server, name: &str) -> Option<ResolvedPlayer> {
         let name_lower = name.to_lowercase();
 
         // 1. Check online players first
@@ -136,7 +137,7 @@ impl UuidResolver {
     }
 
     /// Get player by name or UUID (tries both)
-    pub async fn resolve(&self, server: &crate::pumpkin_plugin_api::Server, identifier: &str) -> Option<ResolvedPlayer> {
+    pub async fn resolve(&self, server: &Server, identifier: &str) -> Option<ResolvedPlayer> {
         // Try as UUID first (36 chars with hyphens or 32 without)
         if identifier.len() >= 32 && identifier.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
             if let Some(name) = self.resolve_uuid(identifier).await {
@@ -293,7 +294,7 @@ impl UuidResolver {
     /// Synchronously resolve a player identifier (name or UUID) using cache only.
     /// Returns ResolvedPlayer if found in cache or online, None otherwise.
     /// For cache misses, returns None (caller should handle fallback).
-    pub fn resolve_sync(&self, server: &crate::pumpkin_plugin_api::Server, identifier: &str) -> Option<ResolvedPlayer> {
+    pub fn resolve_sync(&self, server: &Server, identifier: &str) -> Option<ResolvedPlayer> {
         let identifier_lower = identifier.to_lowercase();
 
         // 1. Check online players first

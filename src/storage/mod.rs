@@ -19,7 +19,7 @@ use sqlite::SqliteStorage;
 /// Storage backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum StorageBackend {
+pub enum StorageBackendType {
     Json,
     Sqlite,
 }
@@ -52,7 +52,7 @@ pub trait StorageBackend: Send + Sync {
     fn keys(&self, table: &str) -> StorageResult<Vec<String>>;
     fn values<T: for<'de> Deserialize<'de>>(&self, table: &str) -> StorageResult<Vec<T>>;
     fn flush(&self) -> StorageResult<()>;
-    fn backend_type(&self) -> StorageBackend;
+    fn backend_type(&self) -> StorageBackendType;
 }
 
 /// Main storage handle - clones are cheap (Arc internally)
@@ -63,16 +63,16 @@ pub struct Storage {
 
 impl Storage {
     /// Create storage with auto-detected backend based on config and platform
-    pub fn new(data_folder: &str, backend: StorageBackend) -> StorageResult<Self> {
+    pub fn new(data_folder: &str, backend: StorageBackendType) -> StorageResult<Self> {
         let path = PathBuf::from(data_folder);
         std::fs::create_dir_all(&path)?;
 
         let inner: Arc<dyn StorageBackend> = match backend {
-            StorageBackend::Json => Arc::new(JsonStorage::new(&path)?),
+            StorageBackendType::Json => Arc::new(JsonStorage::new(&path)?),
             #[cfg(not(target_arch = "wasm32"))]
-            StorageBackend::Sqlite => Arc::new(SqliteStorage::new(&path)?),
+            StorageBackendType::Sqlite => Arc::new(SqliteStorage::new(&path)?),
             #[cfg(target_arch = "wasm32")]
-            StorageBackend::Sqlite => {
+            StorageBackendType::Sqlite => {
                 tracing::warn!("SQLite not available on WASM, falling back to JSON");
                 Arc::new(JsonStorage::new(&path)?)
             }
@@ -122,7 +122,7 @@ impl Storage {
         self.inner.flush()
     }
 
-    pub fn backend_type(&self) -> StorageBackend {
+    pub fn backend_type(&self) -> StorageBackendType {
         self.inner.backend_type()
     }
 }
@@ -134,8 +134,3 @@ impl std::fmt::Debug for Storage {
             .finish()
     }
 }
-
-/// Re-export for convenience
-pub use self::json::JsonStorage;
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::sqlite::SqliteStorage;
