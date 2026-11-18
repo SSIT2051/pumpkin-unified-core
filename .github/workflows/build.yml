@@ -13,13 +13,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip3
+          targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
-      - name: Build plugin (wasm32-wasip3)
-        run: cargo build --release --target wasm32-wasip3
+      - name: Build plugin (wasm32-wasip2, WASI 0.2)
+        run: cargo build --release --target wasm32-wasip2
       - name: Run unit tests (host)
         run: cargo test --target x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v4
         with:
           name: pumpkin-unified-core.wasm
-          path: target/wasm32-wasip3/release/pumpkin_unified_core.wasm
+          path: target/wasm32-wasip2/release/pumpkin_unified_core.wasm

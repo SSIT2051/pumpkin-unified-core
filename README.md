@@ -4,7 +4,7 @@ Unified **EssentialsX** + **LuckPerms** plugin for PumpkinMC, written in Rust as
 native **WebAssembly component** (`.wasm`) using the official
 [`pumpkin-plugin-api`](https://crates.io/crates/pumpkin-plugin-api).
 
-Pumpkin plugins are WASM components (target `wasm32-wasip3`) loaded by the server's
+Pumpkin plugins are WASM components (target `wasm32-wasip2`) loaded by the server's
 plugin host — there is no native `.so` plugin API. This project follows the official
 Pumpkin plugin documentation exactly.
 
@@ -44,14 +44,14 @@ will use the inventory API in a follow-up.
 
 ## Building
 
-Requires the `wasm32-wasip3` target:
+Requires the `wasm32-wasip2` target:
 
 ```bash
-rustup target add wasm32-wasip3
-cargo build --release --target wasm32-wasip3
+rustup target add wasm32-wasip2
+cargo build --release --target wasm32-wasip2
 ```
 
-The plugin is produced at `target/wasm32-wasip3/release/pumpkin_unified_core.wasm`.
+The plugin is produced at `target/wasm32-wasip2/release/pumpkin_unified_core.wasm`.
 `.cargo/config.toml` already pins the target.
 
 ## Installation

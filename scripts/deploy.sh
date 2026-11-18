@@ -4,10 +4,10 @@ set -e
 SSH_KEY="${1:-$HOME/.ssh/id_ed25519}"
 VM_HOST="${2:-pumpkin-vm}"
 VM_USER="${3:-root}"
-PLUGIN_PATH="target/wasm32-wasip3/release/pumpkin_unified_core.wasm"
+PLUGIN_PATH="target/wasm32-wasip2/release/pumpkin_unified_core.wasm"
 
 if [ ! -f "$PLUGIN_PATH" ]; then
-    echo "Plugin not found at $PLUGIN_PATH. Run 'cargo build --release --target wasm32-wasip3' first."
+    echo "Plugin not found at $PLUGIN_PATH. Run 'cargo build --release --target wasm32-wasip2' first."
     exit 1
 fi
 
