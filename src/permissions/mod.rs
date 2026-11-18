@@ -311,11 +311,6 @@ impl Permissions {
 
         exact.or(wildcard).unwrap_or(false)
     }
-            }
-        }
-
-        exact.or(wildcard).unwrap_or(false)
-    }
 
     // ----- meta (prefix/suffix) -----
 
