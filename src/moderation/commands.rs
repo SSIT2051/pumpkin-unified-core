@@ -1,5 +1,6 @@
 use crate::moderation::{Moderation, Punishment};
 use crate::utils::text::format_text;
+use crate::utils::uuid_resolver::ResolvedPlayer;
 use pumpkin_plugin_api::{
     command::{
         Arg, ArgumentType, Command, CommandError, CommandNode, CommandSender, ConsumedArgs,
@@ -20,6 +21,13 @@ fn arg_string(args: &ConsumedArgs, key: &str) -> Option<String> {
     }
 }
 
+fn arg_greedy(args: &ConsumedArgs, key: &str) -> Option<String> {
+    match args.get_value(key) {
+        Arg::Msg(s) => Some(s),
+        _ => None,
+    }
+}
+
 fn greedy_arg(name: &str) -> CommandNode {
     CommandNode::argument(name, &ArgumentType::String(StringType::Greedy))
 }
@@ -28,7 +36,17 @@ fn string_arg(name: &str) -> CommandNode {
     CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord))
 }
 
-/// Resolves a target player name to an online `Player`, sending an error if missing.
+/// Resolves a target player identifier (name or UUID) to a ResolvedPlayer,
+/// checking online players first, then UUID cache, then Mojang API.
+async fn resolve_target(
+    moderation: &Arc<Moderation>,
+    server: &Server,
+    identifier: &str,
+) -> Option<ResolvedPlayer> {
+    moderation.uuid_resolver().resolve(server, identifier).await
+}
+
+/// Resolves a target player identifier for commands that need online players only.
 fn require_online(
     sender: &CommandSender,
     server: &Server,
@@ -94,19 +112,22 @@ impl CommandHandler for BanHandler {
     ) -> Result<i32, CommandError> {
         let name = arg_string(&args, "target").unwrap_or_default();
         let reason = arg_string(&args, "reason").unwrap_or_else(|| "Banned".to_string());
-        // Ban works for offline players too, via the ban manager. We need a uuid:
-        // use the online player's uuid if online, else generate a placeholder keyed by name.
-        let (uuid_string, uuid) = if let Some(player) = server.get_player_by_name(&name) {
-            let id = player.get_id();
-            (id.to_string(), Some(id))
-        } else {
-            (name.clone(), None)
+        
+        // Resolve target using UUID resolver (supports offline players)
+        let resolved = self.moderation.uuid_resolver().resolve_sync(&server, &name);
+        let (uuid_string, uuid, display_name) = match resolved {
+            Some(r) => (r.uuid, r.uuid.parse().ok(), r.name),
+            None => {
+                // Fallback: use name as UUID for completely unknown players
+                self.moderation.uuid_resolver().cache_negative_sync(&name);
+                (name.clone(), None, name.clone())
+            }
         };
 
         let ban_manager = server.get_ban_manager();
         if let Some(id) = uuid {
             ban_manager.ban_player(
-                &name,
+                &display_name,
                 id,
                 BanPlayerOptions {
                     reason: Some(format_text(&reason)),
@@ -121,14 +142,14 @@ impl CommandHandler for BanHandler {
 
         self.moderation.set_punishment(&Punishment {
             uuid: uuid_string,
-            name: name.clone(),
+            name: display_name.clone(),
             kind: "ban".to_string(),
             reason: reason.clone(),
             created_at: crate::utils::time::now_timestamp(),
             expires_at: None,
         });
         sender.send_message(format_text(&format!(
-            "&aBanned &f{name} &7({reason})"
+            "&aBanned &f{display_name} &7({reason})"
         )));
         Ok(1)
     }
@@ -199,7 +220,75 @@ impl CommandHandler for TempBanHandler {
     }
 }
 
-// ---------------- unban ----------------
+// ---------------- tempban (with UUID resolver) ----------------
+
+pub struct TempBanHandler {
+    moderation: Arc<Moderation>,
+}
+
+impl CommandHandler for TempBanHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let name = arg_string(&args, "target").unwrap_or_default();
+        let duration = arg_string(&args, "duration").unwrap_or_default();
+        let reason = arg_string(&args, "reason").unwrap_or_else(|| "Temp banned".to_string());
+        let seconds = crate::utils::time::parse_duration_seconds(&duration);
+        let seconds = match seconds {
+            Some(s) => s,
+            None => {
+                sender.send_message(format_text("&cInvalid duration"));
+                return Ok(1);
+            }
+        };
+
+        // Resolve target using UUID resolver
+        let resolved = self.moderation.uuid_resolver().resolve_sync(&server, &name);
+        let (uuid_string, uuid, display_name) = match resolved {
+            Some(r) => (r.uuid, r.uuid.parse().ok(), r.name),
+            None => {
+                self.moderation.uuid_resolver().cache_negative_sync(&name);
+                (name.clone(), None, name.clone())
+            }
+        };
+
+        if let Some(id) = uuid {
+            let ban_manager = server.get_ban_manager();
+            ban_manager.ban_player(
+                &display_name,
+                id,
+                BanPlayerOptions {
+                    reason: Some(format_text(&reason)),
+                    source: Some("pumpkin-unified-core".to_string()),
+                    expires_at_utc: None,
+                    duration_seconds: Some(seconds as u64),
+                    kick_if_online: true,
+                    log_to_console: true,
+                },
+            );
+        }
+
+        let now = crate::utils::time::now_timestamp();
+        self.moderation.set_punishment(&Punishment {
+            uuid: uuid_string,
+            name: display_name.clone(),
+            kind: "tempban".to_string(),
+            reason: reason.clone(),
+            created_at: now,
+            expires_at: Some(now + seconds),
+        });
+        sender.send_message(format_text(&format!(
+            "&aTemporarily banned &f{display_name} &7for {}",
+            crate::utils::time::format_duration(seconds)
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- unban (with UUID resolver) ----------------
 
 pub struct UnBanHandler {
     moderation: Arc<Moderation>,
@@ -213,19 +302,29 @@ impl CommandHandler for UnBanHandler {
         args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let name = arg_string(&args, "target").unwrap_or_default();
-        let ban_manager = server.get_ban_manager();
-        // Try online uuid first, then fall back to stored punishment uuid.
-        let removed = if let Some(player) = server.get_player_by_name(&name) {
-            ban_manager.unban_player(player.get_id())
-        } else if let Some(p) = self.moderation.get_punishment_by_name(&name) {
-            self.moderation.remove_punishment(&p.uuid);
-            true
-        } else {
-            false
+        
+        // Resolve target using UUID resolver
+        let resolved = self.moderation.uuid_resolver().resolve_sync(&server, &name);
+        let (uuid_string, display_name) = match resolved {
+            Some(r) => (r.uuid, r.name),
+            None => {
+                // For unban, we need to check stored punishments by name too
+                if let Some(punishment) = self.moderation.get_punishment_by_name(&name) {
+                    (punishment.uuid, punishment.name)
+                } else {
+                    (name.clone(), name.clone())
+                }
+            }
         };
-        if removed {
-            sender.send_message(format_text(&format!("&aUnbanned &f{name}")));
-        } else {
+
+        let ban_manager = server.get_ban_manager();
+        ban_manager.pardon_player(&display_name);
+
+        self.moderation.remove_punishment(&uuid_string);
+        sender.send_message(format_text(&format!("&aUnbanned &f{display_name}")));
+        Ok(1)
+    }
+}
             sender.send_message(format_text(&format!("&c{} is not banned", name)));
         }
         Ok(1)
@@ -492,6 +591,273 @@ impl CommandHandler for VanishHandler {
     }
 }
 
+// ---------------- jail ----------------
+
+pub struct JailHandler {
+    moderation: Arc<Moderation>,
+}
+
+impl CommandHandler for JailHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target").unwrap_or_default();
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!("&cPlayer not found: {target_name}")));
+                return Ok(1);
+            }
+        };
+        let uuid = target.get_id().to_string();
+        let new_state = !self.moderation.state(&uuid).jailed;
+        self.moderation.set_jailed(&uuid, new_state);
+        sender.send_message(format_text(&format!(
+            "&aJail {} for &f{}",
+            if new_state { "enabled" } else { "disabled" },
+            target_name
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- warn ----------------
+
+pub struct WarnHandler {
+    moderation: Arc<Moderation>,
+}
+
+impl CommandHandler for WarnHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target").unwrap_or_default();
+        let reason = arg_greedy(&args, "reason").unwrap_or("No reason given".to_string());
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!("&cPlayer not found: {target_name}")));
+                return Ok(1);
+            }
+        };
+        // Store warning as punishment
+        let punishment = Punishment {
+            uuid: target.get_id().to_string(),
+            name: target.get_name(),
+            kind: "warn".to_string(),
+            reason,
+            created_at: crate::utils::time::now_timestamp(),
+            expires_at: None,
+        };
+        self.moderation.set_punishment(&punishment);
+        target.send_system_message(
+            format_text(&format!("&cWarning: &f{}", punishment.reason)),
+            false,
+        );
+        sender.send_message(format_text(&format!(
+            "&aWarned &f{} &afor &f{}",
+            target.get_name(),
+            punishment.reason
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- socialspy ----------------
+
+pub struct SocialSpyHandler {
+    moderation: Arc<Moderation>,
+}
+
+impl CommandHandler for SocialSpyHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target")
+            .or_else(|| sender.as_player().map(|p| p.get_name()))
+            .unwrap_or_default();
+        if target_name.is_empty() {
+            sender.send_message(format_text("&cUsage: /socialspy [player]"));
+            return Ok(1);
+        }
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!("&cPlayer not found: {target_name}")));
+                return Ok(1);
+            }
+        };
+        let uuid = target.get_id().to_string();
+        let new_state = !self.moderation.state(&uuid).social_spy;
+        self.moderation.set_social_spy(&uuid, new_state);
+        sender.send_message(format_text(&format!(
+            "&aSocial Spy {} for &f{}",
+            if new_state { "enabled" } else { "disabled" },
+            target_name
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- nopain ----------------
+
+pub struct NoPainHandler {
+    moderation: Arc<Moderation>,
+}
+
+impl CommandHandler for NoPainHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target")
+            .or_else(|| sender.as_player().map(|p| p.get_name()))
+            .unwrap_or_default();
+        if target_name.is_empty() {
+            sender.send_message(format_text("&cUsage: /nopain [player]"));
+            return Ok(1);
+        }
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!("&cPlayer not found: {target_name}")));
+                return Ok(1);
+            }
+        };
+        let uuid = target.get_id().to_string();
+        let new_state = !self.moderation.state(&uuid).no_pain;
+        self.moderation.set_no_pain(&uuid, new_state);
+        sender.send_message(format_text(&format!(
+            "&aNo Pain {} for &f{}",
+            if new_state { "enabled" } else { "disabled" },
+            target_name
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- keepinv ----------------
+
+pub struct KeepInvHandler {
+    moderation: Arc<Moderation>,
+}
+
+impl CommandHandler for KeepInvHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target")
+            .or_else(|| sender.as_player().map(|p| p.get_name()))
+            .unwrap_or_default();
+        if target_name.is_empty() {
+            sender.send_message(format_text("&cUsage: /keepinv [player]"));
+            return Ok(1);
+        }
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!("&cPlayer not found: {target_name}")));
+                return Ok(1);
+            }
+        };
+        let uuid = target.get_id().to_string();
+        let new_state = !self.moderation.state(&uuid).keep_inventory;
+        self.moderation.set_keep_inventory(&uuid, new_state);
+        sender.send_message(format_text(&format!(
+            "&aKeep Inventory {} for &f{}",
+            if new_state { "enabled" } else { "disabled" },
+            target_name
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- kill ----------------
+
+pub struct KillHandler;
+
+impl CommandHandler for KillHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target")
+            .or_else(|| sender.as_player().map(|p| p.get_name()))
+            .unwrap_or_default();
+        if target_name.is_empty() {
+            sender.send_message(format_text("&cUsage: /kill [player]"));
+            return Ok(1);
+        }
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!("&cPlayer not found: {target_name}")));
+                return Ok(1);
+            }
+        };
+        target.set_health(0.0);
+        sender.send_message(format_text(&format!("&aKilled &f{}", target.get_name())));
+        Ok(1)
+    }
+}
+
+// ---------------- killall ----------------
+
+pub struct KillAllHandler;
+
+impl CommandHandler for KillAllHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        // This would require entity API to kill all mobs
+        sender.send_message(format_text("&eKillAll requires entity API integration"));
+        Ok(1)
+    }
+}
+
+// ---------------- suicide ----------------
+
+pub struct SuicideHandler;
+
+impl CommandHandler for SuicideHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match sender.as_player() {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text("&cOnly players can use /suicide"));
+                return Ok(1);
+            }
+        };
+        player.set_health(0.0);
+        sender.send_message(format_text("&aYou committed suicide"));
+        Ok(1)
+    }
+}
+
 // ---------------- registration ----------------
 
 fn target_reason() -> CommandNode {
@@ -560,4 +926,64 @@ pub fn register(moderation: Arc<Moderation>, context: &Context) {
             moderation: moderation.clone(),
         }));
     context.register_command(vanish, "pumpkin-unified-core:essentials.vanish");
+
+    // /jail <player>
+    let jail = Command::new(&["jail".to_string()], "Jail a player")
+        .then(string_arg("target").execute(JailHandler {
+            moderation: moderation.clone(),
+        }));
+    context.register_command(jail, "pumpkin-unified-core:essentials.jail");
+
+    // /warn <player> <reason>
+    let warn = Command::new(&["warn".to_string()], "Warn a player")
+        .then(target_reason().execute(WarnHandler {
+            moderation: moderation.clone(),
+        }));
+    context.register_command(warn, "pumpkin-unified-core:essentials.warn");
+
+    // /socialspy [player]
+    let socialspy = Command::new(&["socialspy".to_string()], "Toggle social spy")
+        .then(string_arg("target").execute(SocialSpyHandler {
+            moderation: moderation.clone(),
+        }))
+        .execute(SocialSpyHandler {
+            moderation: moderation.clone(),
+        });
+    context.register_command(socialspy, "pumpkin-unified-core:essentials.socialspy");
+
+    // /nopain [player]
+    let nopain = Command::new(&["nopain".to_string()], "Toggle no pain")
+        .then(string_arg("target").execute(NoPainHandler {
+            moderation: moderation.clone(),
+        }))
+        .execute(NoPainHandler {
+            moderation: moderation.clone(),
+        });
+    context.register_command(nopain, "pumpkin-unified-core:essentials.nopain");
+
+    // /keepinv [player]
+    let keepinv = Command::new(&["keepinv".to_string()], "Toggle keep inventory")
+        .then(string_arg("target").execute(KeepInvHandler {
+            moderation: moderation.clone(),
+        }))
+        .execute(KeepInvHandler {
+            moderation: moderation.clone(),
+        });
+    context.register_command(keepinv, "pumpkin-unified-core:essentials.keepinv");
+
+    // /kill [player]
+    let kill = Command::new(&["kill".to_string()], "Kill a player")
+        .then(string_arg("target").execute(KillHandler))
+        .execute(KillHandler);
+    context.register_command(kill, "pumpkin-unified-core:essentials.kill");
+
+    // /killall
+    let killall = Command::new(&["killall".to_string()], "Kill all entities")
+        .execute(KillAllHandler);
+    context.register_command(killall, "pumpkin-unified-core:essentials.killall");
+
+    // /suicide
+    let suicide = Command::new(&["suicide".to_string()], "Kill yourself")
+        .execute(SuicideHandler);
+    context.register_command(suicide, "pumpkin-unified-core:essentials.suicide");
 }

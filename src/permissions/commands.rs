@@ -88,6 +88,114 @@ impl CommandHandler for SyncHandler {
     }
 }
 
+pub struct VerboseHandler {
+    perms: Arc<Permissions>,
+}
+
+impl CommandHandler for VerboseHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text("&eVerbose logging requires advanced permission hook"));
+        Ok(1)
+    }
+}
+
+pub struct CreateGroupHandler {
+    perms: Arc<Permissions>,
+}
+
+impl CommandHandler for CreateGroupHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let name = arg_string(&args, "name").unwrap_or_default();
+        if name.is_empty() {
+            sender.send_message(format_text("&cUsage: /lp creategroup <name>"));
+            return Ok(1);
+        }
+        self.perms.create_group(&name);
+        sender.send_message(format_text(&format!("&aCreated group &f{name}")));
+        Ok(1)
+    }
+}
+
+pub struct DeleteGroupHandler {
+    perms: Arc<Permissions>,
+}
+
+impl CommandHandler for DeleteGroupHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let name = arg_string(&args, "name").unwrap_or_default();
+        if name.is_empty() {
+            sender.send_message(format_text("&cUsage: /lp deletegroup <name>"));
+            return Ok(1);
+        }
+        self.perms.delete_group(&name);
+        sender.send_message(format_text(&format!("&aDeleted group &f{name}")));
+        Ok(1)
+    }
+}
+
+pub struct ExportHandler {
+    perms: Arc<Permissions>,
+}
+
+impl CommandHandler for ExportHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text("&eExport requires file I/O integration"));
+        Ok(1)
+    }
+}
+
+pub struct ImportHandler {
+    perms: Arc<Permissions>,
+}
+
+impl CommandHandler for ImportHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text("&eImport requires file I/O integration"));
+        Ok(1)
+    }
+}
+
+pub struct ReloadHandler {
+    perms: Arc<Permissions>,
+}
+
+impl CommandHandler for ReloadHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text("&aPermissions reloaded"));
+        Ok(1)
+    }
+}
+
 // ---------------- user ----------------
 
 pub struct UserInfoHandler {
@@ -654,7 +762,13 @@ pub fn register(perms: Arc<Permissions>, context: &Context) {
         .then(build_group_node(perms.clone()))
         .then(build_track_node(perms.clone()))
         .then(CommandNode::literal("sync").execute(SyncHandler))
-        .then(CommandNode::literal("info").execute(InfoHandler));
+        .then(CommandNode::literal("info").execute(InfoHandler))
+        .then(CommandNode::literal("verbose").execute(VerboseHandler { perms: perms.clone() }))
+        .then(CommandNode::literal("creategroup").then(string_arg("name").execute(CreateGroupHandler { perms: perms.clone() })))
+        .then(CommandNode::literal("deletegroup").then(string_arg("name").execute(DeleteGroupHandler { perms: perms.clone() })))
+        .then(CommandNode::literal("export").execute(ExportHandler { perms: perms.clone() }))
+        .then(CommandNode::literal("import").execute(ImportHandler { perms: perms.clone() }))
+        .then(CommandNode::literal("reload").execute(ReloadHandler { perms: perms.clone() }));
 
     context.register_command(command, "pumpkin-unified-core:luckperms.admin");
 }

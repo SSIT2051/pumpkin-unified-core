@@ -1,0 +1,172 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+  push:
+    branches: [main, wasm-official-rebuild]
+
+jobs:
+  integration-test:
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Wait for build artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const wfRuns = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build.yml',
+              head_sha: context.payload.pull_request?.head.sha || context.sha,
+              status: 'completed',
+              per_page: 1
+            });
+            const run = wfRuns.data.workflow_runs[0];
+            if (!run || run.conclusion !== 'success') {
+              core.setFailed('No successful build.yml run found for this commit');
+              return;
+            }
+            core.info(`Using build run ${run.id}`);
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pumpkin-unified-core.wasm
+          path: ./dist
+
+      - name: Prepare SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PUMPKIN_VM_SSH_KEY }}
+        run: |
+          echo "$SSH_PRIVATE_KEY" > /tmp/key.pem
+          chmod 600 /tmp/key.pem
+
+      - name: Deploy plugin to VM
+        env:
+          VM_HOST: ${{ secrets.PUMPKIN_VM_HOST }}
+          VM_PORT: ${{ secrets.PUMPKIN_VM_PORT }}
+          VM_USER: ${{ secrets.PUMPKIN_VM_USER }}
+        run: |
+          set -euo pipefail
+          HOST="${VM_HOST:-th-bkk02.altare.global}"
+          PORT="${VM_PORT:-25491}"
+          USER="${VM_USER:-root}"
+          scp -i /tmp/key.pem -P "$PORT" -o StrictHostKeyChecking=no \
+            dist/pumpkin_unified_core.wasm \
+            "$USER@$HOST:/root/pumpkin-server/plugins/pumpkin-unified-core.wasm.new"
+          ssh -i /tmp/key.pem -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" bash -s << EOF
+            set -euo pipefail
+            cd /root/pumpkin-server
+            BACKUP="plugins/pumpkin-unified-core.wasm.\$(date +%s).bak"
+            mv plugins/pumpkin-unified-core.wasm "\$BACKUP" 2>/dev/null || true
+            mv plugins/pumpkin-unified-core.wasm.new plugins/pumpkin-unified-core.wasm
+            echo "Deployed (backup: \$BACKUP)"
+          EOF
+
+      - name: Restart server and wait for ready
+        env:
+          VM_HOST: ${{ secrets.PUMPKIN_VM_HOST }}
+          VM_PORT: ${{ secrets.PUMPKIN_VM_PORT }}
+          VM_USER: ${{ secrets.PUMPKIN_VM_USER }}
+        run: |
+          set -euo pipefail
+          HOST="${VM_HOST:-th-bkk02.altare.global}"
+          PORT="${VM_PORT:-25491}"
+          USER="${VM_USER:-root}"
+          ssh -i /tmp/key.pem -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" \
+            "sudo systemctl restart pumpkin"
+          echo "Waiting for PumpkinMC to accept RCON..."
+          for i in $(seq 1 30); do
+            if rcon-cli --host "$HOST" --port "${RCON_PORT:-25575}" --password "${RCON_PASSWORD:-changeme_secure_password}" "list" 2>/dev/null; then
+              echo "Server is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: Server did not become ready in 60s"
+          exit 1
+        env:
+          RCON_PORT: ${{ secrets.PUMPKIN_RCON_PORT }}
+          RCON_PASSWORD: ${{ secrets.PUMPKIN_RCON_PASSWORD }}
+
+      - name: Run integration tests
+        id: test
+        env:
+          VM_HOST: ${{ secrets.PUMPKIN_VM_HOST }}
+          VM_PORT: ${{ secrets.PUMPKIN_VM_PORT }}
+          VM_USER: ${{ secrets.PUMPKIN_VM_USER }}
+          RCON_PORT: ${{ secrets.PUMPKIN_RCON_PORT }}
+          RCON_PASSWORD: ${{ secrets.PUMPKIN_RCON_PASSWORD }}
+        run: |
+          set -euo pipefail
+          HOST="${VM_HOST:-th-bkk02.altare.global}"
+          PORT="${VM_PORT:-25491}"
+          USER="${VM_USER:-root}"
+          export RCON_HOST="$HOST"
+          export RCON_PORT="${RCON_PORT:-25575}"
+          export RCON_PASSWORD="${RCON_PASSWORD:-changeme_secure_password}"
+          ssh -i /tmp/key.pem -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" \
+            "bash -s" < scripts/integration_test.sh 2>&1 | tee test-output.txt
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-output
+          path: test-output.txt
+
+      - name: Rollback on failure
+        if: failure()
+        env:
+          VM_HOST: ${{ secrets.PUMPKIN_VM_HOST }}
+          VM_PORT: ${{ secrets.PUMPKIN_VM_PORT }}
+          VM_USER: ${{ secrets.PUMPKIN_VM_USER }}
+        run: |
+          set -euo pipefail
+          HOST="${VM_HOST:-th-bkk02.altare.global}"
+          PORT="${VM_PORT:-25491}"
+          USER="${VM_USER:-root}"
+          ssh -i /tmp/key.pem -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" bash -s << 'EOF'
+            set -euo pipefail
+            cd /root/pumpkin-server
+            BACKUP=$(ls -1t plugins/pumpkin-unified-core.wasm.*.bak 2>/dev/null | head -1 || true)
+            if [ -n "$BACKUP" ]; then
+              mv "$BACKUP" plugins/pumpkin-unified-core.wasm
+              echo "Rolled back to $BACKUP"
+              sudo systemctl restart pumpkin
+            else
+              echo "No backup found; leaving failed plugin in place"
+            fi
+          EOF
+
+      - name: Report results to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '';
+            try {
+              body = fs.readFileSync('test-output.txt', 'utf8').slice(0, 60000);
+            catch (_) {
+              body = '(no test output captured)';
+            }
+            const conclusion = '${{ steps.test.outcome }}' === 'success' ? '✅ PASSED' : '❌ FAILED';
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info('No PR context; skipping comment');
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: `## Integration Tests: ${conclusion}\n\n\`\`\`\n${body}\n\`\`\``
+            });

@@ -1,104 +1,141 @@
-//! WASI file-based key/value storage.
+//! Multi-backend storage for PumpkinMC plugins.
 //!
-//! Pumpkin plugins run inside a WebAssembly sandbox. The only durable storage is
-//! the plugin's private WASI data folder, exposed through the normal file system.
-//! This module persists a single JSON document (`<data_folder>/data.json`) that
-//! maps table names to key/value records. Values are stored as `serde_json::Value`
-//! so callers can (de)serialize their own typed structs.
+//! Supports JSON (WASM-compatible) and SQLite (native) backends.
+//! Provides file locking, batch writes, and proper error handling.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
+use thiserror::Error;
 
-type Table = BTreeMap<String, serde_json::Value>;
+pub mod json;
+pub mod sqlite;
 
-#[derive(Default, Serialize, Deserialize)]
-struct Store {
-    #[serde(default)]
-    tables: BTreeMap<String, Table>,
+use json::JsonStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use sqlite::SqliteStorage;
+
+/// Storage backend type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageBackend {
+    Json,
+    Sqlite,
 }
 
-/// A small synchronous, file-backed store guarded by a `Mutex`.
-///
-/// The plugin trait requires `Send + Sync`, and the WASM runtime is effectively
-/// single-threaded, so a `Mutex` is cheap and safe here. Callers must not hold
-/// the internal lock across a host API call; each method locks, copies out the
-/// data it needs, and releases before returning.
+/// Storage errors
+#[derive(Debug, Error)]
+pub enum StorageError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("Lock error: {0}")]
+    Lock(String),
+    #[error("Key not found: {0}")]
+    NotFound(String),
+    #[error("Backend error: {0}")]
+    Backend(String),
+    #[error("SQLite error: {0}")]
+    #[cfg(not(target_arch = "wasm32"))]
+    Sqlite(#[from] rusqlite::Error),
+}
+
+pub type StorageResult<T> = Result<T, StorageError>;
+
+/// Trait for storage backends
+pub trait StorageBackend: Send + Sync {
+    fn get<T: for<'de> Deserialize<'de>>(&self, table: &str, key: &str) -> StorageResult<Option<T>>;
+    fn set<T: Serialize>(&self, table: &str, key: &str, value: &T) -> StorageResult<()>;
+    fn delete(&self, table: &str, key: &str) -> StorageResult<()>;
+    fn keys(&self, table: &str) -> StorageResult<Vec<String>>;
+    fn values<T: for<'de> Deserialize<'de>>(&self, table: &str) -> StorageResult<Vec<T>>;
+    fn flush(&self) -> StorageResult<()>;
+    fn backend_type(&self) -> StorageBackend;
+}
+
+/// Main storage handle - clones are cheap (Arc internally)
+#[derive(Clone)]
 pub struct Storage {
-    store: Mutex<Store>,
-    path: String,
+    inner: Arc<dyn StorageBackend>,
 }
 
 impl Storage {
-    /// Creates a store rooted at `data_folder`, loading any existing `data.json`.
-    pub fn new(data_folder: &str) -> Self {
-        let path = format!("{data_folder}/data.json");
-        let store = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        Self {
-            store: Mutex::new(store),
-            path,
-        }
-    }
+    /// Create storage with auto-detected backend based on config and platform
+    pub fn new(data_folder: &str, backend: StorageBackend) -> StorageResult<Self> {
+        let path = PathBuf::from(data_folder);
+        std::fs::create_dir_all(&path)?;
 
-    fn persist(&self, store: &Store) {
-        if let Ok(json) = serde_json::to_string(store) {
-            let _ = std::fs::write(&self.path, json);
-        }
-    }
-
-    /// Loads and deserializes `key` from `table`, if present.
-    pub fn get<T: for<'de> Deserialize<'de>>(&self, table: &str, key: &str) -> Option<T> {
-        let store = self.store.lock().ok()?;
-        store
-            .tables
-            .get(table)
-            .and_then(|t| t.get(key))
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-    }
-
-    /// Serializes and stores `value` under `key` in `table`, then flushes to disk.
-    pub fn set<T: Serialize>(&self, table: &str, key: &str, value: &T) {
-        let Ok(mut store) = self.store.lock() else {
-            return;
+        let inner: Arc<dyn StorageBackend> = match backend {
+            StorageBackend::Json => Arc::new(JsonStorage::new(&path)?),
+            #[cfg(not(target_arch = "wasm32"))]
+            StorageBackend::Sqlite => Arc::new(SqliteStorage::new(&path)?),
+            #[cfg(target_arch = "wasm32")]
+            StorageBackend::Sqlite => {
+                tracing::warn!("SQLite not available on WASM, falling back to JSON");
+                Arc::new(JsonStorage::new(&path)?)
+            }
         };
-        let Ok(json) = serde_json::to_value(value) else {
-            return;
-        };
-        store
-            .tables
-            .entry(table.to_string())
-            .or_default()
-            .insert(key.to_string(), json);
-        self.persist(&store);
+
+        Ok(Self { inner })
     }
 
-    /// Removes `key` from `table` and flushes to disk.
-    pub fn delete(&self, table: &str, key: &str) {
-        let Ok(mut store) = self.store.lock() else {
-            return;
-        };
-        if let Some(t) = store.tables.get_mut(table) {
-            t.remove(key);
-        }
-        self.persist(&store);
+    /// Create JSON storage (always available)
+    pub fn new_json(data_folder: &str) -> StorageResult<Self> {
+        let path = PathBuf::from(data_folder);
+        std::fs::create_dir_all(&path)?;
+        let inner = Arc::new(JsonStorage::new(&path)?);
+        Ok(Self { inner })
     }
 
-    /// Returns all keys stored in `table`.
-    pub fn keys(&self, table: &str) -> Vec<String> {
-        self.store
-            .lock()
-            .ok()
-            .and_then(|s| s.tables.get(table).map(|t| t.keys().cloned().collect()))
-            .unwrap_or_default()
+    #[cfg(not(target_arch = "wasm32"))]
+    /// Create SQLite storage (native only)
+    pub fn new_sqlite(data_folder: &str) -> StorageResult<Self> {
+        let path = PathBuf::from(data_folder);
+        std::fs::create_dir_all(&path)?;
+        let inner = Arc::new(SqliteStorage::new(&path)?);
+        Ok(Self { inner })
     }
 
-    /// Returns all deserialized values in `table`.
-    pub fn values<T: for<'de> Deserialize<'de>>(&self, table: &str) -> Vec<T> {
-        let keys = self.keys(table);
-        keys.iter().filter_map(|k| self.get::<T>(table, k)).collect()
+    pub fn get<T: for<'de> Deserialize<'de>>(&self, table: &str, key: &str) -> StorageResult<Option<T>> {
+        self.inner.get(table, key)
+    }
+
+    pub fn set<T: Serialize>(&self, table: &str, key: &str, value: &T) -> StorageResult<()> {
+        self.inner.set(table, key, value)
+    }
+
+    pub fn delete(&self, table: &str, key: &str) -> StorageResult<()> {
+        self.inner.delete(table, key)
+    }
+
+    pub fn keys(&self, table: &str) -> StorageResult<Vec<String>> {
+        self.inner.keys(table)
+    }
+
+    pub fn values<T: for<'de> Deserialize<'de>>(&self, table: &str) -> StorageResult<Vec<T>> {
+        self.inner.values(table)
+    }
+
+    pub fn flush(&self) -> StorageResult<()> {
+        self.inner.flush()
+    }
+
+    pub fn backend_type(&self) -> StorageBackend {
+        self.inner.backend_type()
     }
 }
+
+impl std::fmt::Debug for Storage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Storage")
+            .field("backend", &self.inner.backend_type())
+            .finish()
+    }
+}
+
+/// Re-export for convenience
+pub use self::json::JsonStorage;
+#[cfg(not(target_arch = "wasm32"))]
+pub use self::sqlite::SqliteStorage;

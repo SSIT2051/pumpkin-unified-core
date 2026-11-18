@@ -1,6 +1,7 @@
 //! Chat module: private messaging, mail, and broadcasts.
 
 use crate::config::ChatConfig;
+use crate::permissions::Permissions;
 use crate::storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,14 +22,16 @@ pub struct Chat {
     storage: Arc<Storage>,
     config: ChatConfig,
     reply_targets: Mutex<HashMap<String, String>>,
+    permissions: Arc<Permissions>,
 }
 
 impl Chat {
-    pub fn new(storage: Arc<Storage>, config: ChatConfig) -> Self {
+    pub fn new(storage: Arc<Storage>, config: ChatConfig, permissions: Arc<Permissions>) -> Self {
         Self {
             storage,
             config,
             reply_targets: Mutex::new(HashMap::new()),
+            permissions,
         }
     }
 
@@ -89,12 +92,13 @@ impl Chat {
 
     pub fn format_message(&self, player: &pumpkin_plugin_api::player::Player, message: &str) -> String {
         let format = &self.config.format;
-        let group = "default"; // TODO: Get from permissions
-        let prefix = ""; // TODO: Get from permissions
+        let uuid = player.get_id().to_string();
+        let group = self.permissions.get_primary_group(&uuid).unwrap_or_else(|| "default".to_string());
+        let prefix = self.permissions.get_prefix(&uuid).unwrap_or_default();
         
         format
-            .replace("{group}", group)
-            .replace("{prefix}", prefix)
+            .replace("{group}", &group)
+            .replace("{prefix}", &prefix)
             .replace("{player}", &player.get_name())
             .replace("{message}", message)
     }

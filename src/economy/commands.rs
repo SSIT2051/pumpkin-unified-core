@@ -283,6 +283,71 @@ impl CommandHandler for PayUsageHandler {
     }
 }
 
+// ---------------- worth ----------------
+
+pub struct WorthHandler {
+    econ: Arc<Economy>,
+}
+
+impl CommandHandler for WorthHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match sender.as_player() {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text("&cOnly players can check worth"));
+                return Ok(1);
+            }
+        };
+        // Check item in hand
+        sender.send_message(format_text(
+            "&eWorth: &fThis feature requires item API integration",
+        ));
+        Ok(1)
+    }
+}
+
+// ---------------- sell ----------------
+
+pub struct SellHandler {
+    econ: Arc<Economy>,
+}
+
+impl CommandHandler for SellHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match sender.as_player() {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text("&cOnly players can sell items"));
+                return Ok(1);
+            }
+        };
+        let amount: f64 = arg_string(&args, "amount")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        if amount <= 0.0 {
+            sender.send_message(format_text("&cUsage: /sell <amount|all|hand>"));
+            return Ok(1);
+        }
+        // Add balance
+        self.econ.add_balance(&player.get_id().to_string(), &player.get_name(), amount);
+        sender.send_message(format_text(&format!(
+            "&aSold items for {}",
+            self.econ.format_money(amount)
+        )));
+        Ok(1)
+    }
+}
+
 fn string_arg(name: &str) -> CommandNode {
     CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord))
 }
@@ -349,4 +414,14 @@ pub fn register(econ: Arc<Economy>, context: &Context) {
         ),
     );
     context.register_command(eco, "pumpkin-unified-core:essentials.eco");
+
+    // /worth
+    let worth = Command::new(&["worth".to_string()], "Check item worth")
+        .execute(WorthHandler { econ: econ.clone() });
+    context.register_command(worth, "pumpkin-unified-core:essentials.worth");
+
+    // /sell [amount|hand|all]
+    let sell = Command::new(&["sell".to_string()], "Sell items")
+        .execute(SellHandler { econ });
+    context.register_command(sell, "pumpkin-unified-core:essentials.sell");
 }

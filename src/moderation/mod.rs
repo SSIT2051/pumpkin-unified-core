@@ -2,6 +2,7 @@
 
 use crate::config::ModerationConfig;
 use crate::storage::Storage;
+use crate::utils::uuid_resolver::UuidResolver;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -28,6 +29,7 @@ pub struct Moderation {
     storage: Arc<Storage>,
     config: ModerationConfig,
     state: Mutex<HashMap<String, ModerationState>>,
+    uuid_resolver: Arc<UuidResolver>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -35,15 +37,26 @@ pub struct ModerationState {
     pub flying: bool,
     pub god: bool,
     pub vanished: bool,
+    pub jailed: bool,
+    pub social_spy: bool,
+    pub no_pain: bool,
+    pub keep_inventory: bool,
 }
 
 impl Moderation {
     pub fn new(storage: Arc<Storage>, config: ModerationConfig) -> Self {
+        let uuid_resolver = Arc::new(UuidResolver::new(storage.clone()));
+        uuid_resolver.load_cache();
         Self {
             storage,
             config,
             state: Mutex::new(HashMap::new()),
+            uuid_resolver,
         }
+    }
+
+    pub fn uuid_resolver(&self) -> Arc<UuidResolver> {
+        self.uuid_resolver.clone()
     }
 
     fn key(uuid: &str) -> String {
@@ -58,7 +71,6 @@ impl Moderation {
         );
     }
 
-    #[allow(dead_code)]
     pub fn get_punishment(&self, uuid: &str) -> Option<Punishment> {
         self.storage.get("punishments", &Self::key(uuid))
     }
@@ -79,7 +91,6 @@ impl Moderation {
         self.storage.delete("punishments", &Self::key(uuid));
     }
 
-    #[allow(dead_code)]
     pub fn is_muted(&self, uuid: &str) -> bool {
         match self.get_punishment(uuid) {
             Some(p) => p.kind == "mute" && !p.is_expired(),
@@ -108,6 +119,22 @@ impl Moderation {
         self.state.lock().unwrap().entry(uuid.to_string()).or_default().vanished = vanished;
     }
 
+    pub fn set_jailed(&self, uuid: &str, jailed: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().jailed = jailed;
+    }
+
+    pub fn set_social_spy(&self, uuid: &str, social_spy: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().social_spy = social_spy;
+    }
+
+    pub fn set_no_pain(&self, uuid: &str, no_pain: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().no_pain = no_pain;
+    }
+
+    pub fn set_keep_inventory(&self, uuid: &str, keep_inventory: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().keep_inventory = keep_inventory;
+    }
+
     pub fn ban_message(&self) -> &str {
         &self.config.ban_message
     }
@@ -130,5 +157,21 @@ impl Moderation {
 
     pub fn is_god(&self, uuid: &str) -> bool {
         self.state(uuid).god
+    }
+
+    pub fn is_jailed(&self, uuid: &str) -> bool {
+        self.state(uuid).jailed
+    }
+
+    pub fn is_social_spy(&self, uuid: &str) -> bool {
+        self.state(uuid).social_spy
+    }
+
+    pub fn is_no_pain(&self, uuid: &str) -> bool {
+        self.state(uuid).no_pain
+    }
+
+    pub fn is_keep_inventory(&self, uuid: &str) -> bool {
+        self.state(uuid).keep_inventory
     }
 }

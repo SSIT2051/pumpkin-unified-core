@@ -20,7 +20,6 @@ pub struct TpaRequest {
 }
 
 pub struct Tpa {
-    #[allow(dead_code)]
     storage: Arc<Storage>,
     requests: Mutex<HashMap<String, TpaRequest>>,
     enabled: Mutex<HashMap<String, bool>>,

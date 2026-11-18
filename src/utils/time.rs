@@ -10,7 +10,6 @@ pub fn now_timestamp() -> i64 {
 
 /// Parses a duration string such as `1h30m`, `2d`, `45s`, `10m` into seconds.
 /// Returns `None` if the string is empty, malformed, or evaluates to zero.
-#[allow(dead_code)]
 pub fn parse_duration_seconds(input: &str) -> Option<i64> {
     let input = input.trim().to_lowercase();
     if input.is_empty() {
@@ -53,7 +52,6 @@ pub fn parse_duration_seconds(input: &str) -> Option<i64> {
 }
 
 /// Formats a number of seconds into a compact `1d 2h 3m 4s` string.
-#[allow(dead_code)]
 pub fn format_duration(total_seconds: i64) -> String {
     let mut parts = Vec::new();
     let days = total_seconds / 86_400;
@@ -76,7 +74,6 @@ pub fn format_duration(total_seconds: i64) -> String {
 }
 
 /// Returns `true` if `timestamp + duration_seconds` is in the past.
-#[allow(dead_code)]
 pub fn is_expired(timestamp: i64, duration_seconds: i64) -> bool {
     now_timestamp() > timestamp + duration_seconds
 }

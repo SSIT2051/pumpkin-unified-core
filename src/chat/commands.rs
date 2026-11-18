@@ -202,6 +202,37 @@ impl CommandHandler for BroadcastWorldHandler {
     }
 }
 
+// ---------------- me ----------------
+
+pub struct MeHandler {
+    chat: Arc<Chat>,
+}
+
+impl CommandHandler for MeHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match sender.as_player() {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text("&cOnly players can use /me"));
+                return Ok(1);
+            }
+        };
+        let action = arg_string(&args, "action").unwrap_or_default();
+        if action.is_empty() {
+            sender.send_message(format_text("&cUsage: /me <action>"));
+            return Ok(1);
+        }
+        let name = player.get_name();
+        server.broadcast(&format!("&7* {} {}", name, action));
+        Ok(1)
+    }
+}
+
 // ---------------- registration ----------------
 
 pub fn register(chat: Arc<Chat>, context: &Context) {
@@ -234,4 +265,9 @@ pub fn register(chat: Arc<Chat>, context: &Context) {
     let broadcastworld = Command::new(&["broadcastworld".to_string()], "Broadcast to world")
         .then(greedy_arg("message").execute(BroadcastWorldHandler));
     context.register_command(broadcastworld, "pumpkin-unified-core:essentials.broadcastworld");
+
+    // /me <action>
+    let me = Command::new(&["me".to_string()], "Send action message")
+        .then(greedy_arg("action").execute(MeHandler { chat }));
+    context.register_command(me, "pumpkin-unified-core:essentials.me");
 }

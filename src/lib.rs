@@ -55,10 +55,25 @@ impl Plugin for UnifiedPlugin {
     fn on_load(&self, context: Context) -> Result<()> {
         tracing::info!("Loading pumpkin-unified-core...");
 
-        // Load configuration from environment variables (PUC_ prefix).
-        let config = Arc::new(Config::load());
+        // Load configuration from file (config.yml/toml) and environment variables (PUC_ prefix).
         let data_folder = context.get_data_folder();
-        let storage = Arc::new(Storage::new(&data_folder));
+        let config = Arc::new(Config::load(Some(&data_folder)));
+        
+        // Initialize storage with configured backend
+        let storage_backend = match config.storage.backend {
+            crate::config::StorageBackendConfig::Json => crate::storage::StorageBackend::Json,
+            crate::config::StorageBackendConfig::Sqlite => crate::storage::StorageBackend::Sqlite,
+            crate::config::StorageBackendConfig::Redis => {
+                tracing::warn!("Redis backend not yet implemented, falling back to JSON");
+                crate::storage::StorageBackend::Json
+            }
+            crate::config::StorageBackendConfig::Mysql => {
+                tracing::warn!("MySQL backend not yet implemented, falling back to JSON");
+                crate::storage::StorageBackend::Json
+            }
+        };
+        
+        let storage = Arc::new(crate::storage::Storage::new(&data_folder, storage_backend)?);
 
         let economy = Arc::new(Economy::new(storage.clone(), config.economy.clone()));
         let warps = Arc::new(Warps::new(storage.clone(), config.warps.clone()));
@@ -69,7 +84,7 @@ impl Plugin for UnifiedPlugin {
         let permissions = Arc::new(Permissions::new(storage.clone(), config.permissions.clone()));
         let spawn = Arc::new(SpawnModule::new(storage.clone(), config.spawn.clone()));
         let utility = Arc::new(Utility::new(storage.clone(), config.utility.clone()));
-        let chat = Arc::new(Chat::new(storage.clone(), config.chat.clone()));
+        let chat = Arc::new(Chat::new(storage.clone(), config.chat.clone(), permissions.clone()));
 
         // Register event handlers.
         let event_module = EventModule::new(

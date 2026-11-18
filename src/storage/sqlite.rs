@@ -1,140 +1,126 @@
-use crate::storage::Storage;
-use crate::utils::macros::*;
-use anyhow::Result;
-use sqlx::{Any, AnyPool, Pool, Row};
-use std::collections::HashMap;
-use std::sync::Arc;
+//! SQLite storage backend (native only).
+//!
+//! Uses rusqlite with WAL mode for better concurrency.
+//! Only compiled for non-WASM targets.
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::{StorageBackend, StorageBackendType, StorageError, StorageResult};
+#[cfg(not(target_arch = "wasm32"))]
+use rusqlite::{Connection, OpenFlags, params};
+#[cfg(not(target_arch = "wasm32"))]
+use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Arc, Mutex};
+
+#[cfg(not(target_arch = "wasm32"))]
+/// SQLite storage with WAL mode
 pub struct SqliteStorage {
-    pool: Arc<Pool<Any>>,
+    conn: Arc<Mutex<Connection>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SqliteStorage {
-    pub async fn new(config: &crate::config::SqliteConfig) -> Result<Self> {
-        let database_url = format!("sqlite://{}?mode=rwc", config.path);
-        
-        let pool = sqlx::any::AnyPoolOptions::new()
-            .max_connections(config.max_connections)
-            .connect(&database_url)
-            .await?;
+    /// Create new SQLite storage at the given data folder
+    pub fn new(data_folder: &Path) -> StorageResult<Self> {
+        let path = data_folder.join("data.db");
+        let mut conn = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
+        )?;
+
+        // Enable WAL mode for better concurrency
+        conn.execute("PRAGMA journal_mode = WAL", [])?;
+        conn.execute("PRAGMA synchronous = NORMAL", [])?;
+        conn.execute("PRAGMA busy_timeout = 5000", [])?;
+
+        // Create tables
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS kv_store (
+                table_name TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                PRIMARY KEY (table_name, key)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kv_table ON kv_store(table_name)",
+            [],
+        )?;
 
         Ok(Self {
-            pool: Arc::new(pool),
+            conn: Arc::new(Mutex::new(conn)),
         })
-    }
-
-    async fn ensure_table(&self, table: &str) -> Result<()> {
-        let sql = format!(
-            "CREATE TABLE IF NOT EXISTS {} (key TEXT PRIMARY KEY, value BLOB NOT NULL, updated_at INTEGER NOT NULL)",
-            table
-        );
-        sqlx::query(&sql).execute(self.pool.as_ref()).await?;
-        Ok(())
     }
 }
 
-#[async_trait::async_trait]
-impl Storage for SqliteStorage {
-    async fn init(&self) -> Result<()> {
-        sqlx::query("PRAGMA journal_mode = WAL").execute(self.pool.as_ref()).await?;
-        sqlx::query("PRAGMA synchronous = NORMAL").execute(self.pool.as_ref()).await?;
-        sqlx::query("PRAGMA busy_timeout = 5000").execute(self.pool.as_ref()).await?;
+#[cfg(not(target_arch = "wasm32"))]
+impl StorageBackend for SqliteStorage {
+    fn get<T: for<'de> Deserialize<'de>>(&self, table: &str, key: &str) -> StorageResult<Option<T>> {
+        let conn = self.conn.lock().map_err(|e| StorageError::Lock(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT value FROM kv_store WHERE table_name = ?1 AND key = ?2"
+        )?;
+        let value: Option<String> = stmt.query_row(params![table, key], |row| row.get(0)).ok();
+        Ok(value.and_then(|v| serde_json::from_str(&v).ok()))
+    }
+
+    fn set<T: Serialize>(&self, table: &str, key: &str, value: &T) -> StorageResult<()> {
+        let json = serde_json::to_string(value)?;
+        let conn = self.conn.lock().map_err(|e| StorageError::Lock(e.to_string()))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO kv_store (table_name, key, value) VALUES (?1, ?2, ?3)",
+            params![table, key, json],
+        )?;
         Ok(())
     }
 
-    async fn shutdown(&self) {
-        self.pool.close().await;
-    }
-
-    async fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>> {
-        self.ensure_table(table).await?;
-        let sql = format!("SELECT value FROM {} WHERE key = ?", table);
-        let row = sqlx::query(&sql)
-            .bind(key)
-            .fetch_optional(self.pool.as_ref())
-            .await?;
-        
-        Ok(row.map(|r| r.get::<Vec<u8>, _>("value")))
-    }
-
-    async fn set(&self, table: &str, key: &str, value: &[u8]) -> Result<()> {
-        self.ensure_table(table).await?;
-        let timestamp = chrono::Utc::now().timestamp();
-        let sql = format!(
-            "INSERT INTO {} (key, value, updated_at) VALUES (?, ?, ?)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            table
-        );
-        sqlx::query(&sql)
-        .bind(key)
-        .bind(value)
-        .bind(timestamp)
-        .execute(self.pool.as_ref())
-        .await?;
+    fn delete(&self, table: &str, key: &str) -> StorageResult<()> {
+        let conn = self.conn.lock().map_err(|e| StorageError::Lock(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM kv_store WHERE table_name = ?1 AND key = ?2",
+            params![table, key],
+        )?;
         Ok(())
     }
 
-    async fn delete(&self, table: &str, key: &str) -> Result<()> {
-        self.ensure_table(table).await?;
-        let sql = format!("DELETE FROM {} WHERE key = ?", table);
-        sqlx::query(&sql)
-            .bind(key)
-            .execute(self.pool.as_ref())
-            .await?;
+    fn keys(&self, table: &str) -> StorageResult<Vec<String>> {
+        let conn = self.conn.lock().map_err(|e| StorageError::Lock(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT key FROM kv_store WHERE table_name = ?1"
+        )?;
+        let keys = stmt.query_map(params![table], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(keys)
+    }
+
+    fn values<T: for<'de> Deserialize<'de>>(&self, table: &str) -> StorageResult<Vec<T>> {
+        let conn = self.conn.lock().map_err(|e| StorageError::Lock(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT value FROM kv_store WHERE table_name = ?1"
+        )?;
+        let values = stmt.query_map(params![table], |row| {
+            let json: String = row.get(0)?;
+            serde_json::from_str(&json).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+        })?
+        .collect::<Result<Vec<T>, _>>()?;
+        Ok(values)
+    }
+
+    fn flush(&self) -> StorageResult<()> {
+        // SQLite with WAL mode auto-flushes, but we can force a checkpoint
+        let conn = self.conn.lock().map_err(|e| StorageError::Lock(e.to_string()))?;
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", [])?;
         Ok(())
     }
 
-    async fn exists(&self, table: &str, key: &str) -> Result<bool> {
-        self.ensure_table(table).await?;
-        let sql = format!("SELECT 1 FROM {} WHERE key = ? LIMIT 1", table);
-        let row = sqlx::query(&sql)
-            .bind(key)
-            .fetch_optional(self.pool.as_ref())
-            .await?;
-        Ok(row.is_some())
-    }
-
-    async fn keys(&self, table: &str, pattern: &str) -> Result<Vec<String>> {
-        self.ensure_table(table).await?;
-        let sql = if pattern.contains('%') || pattern.contains('_') {
-            format!("SELECT key FROM {} WHERE key LIKE ?", table)
-        } else {
-            format!("SELECT key FROM {} WHERE key = ?", table)
-        };
-        let rows = sqlx::query(&sql)
-            .bind(pattern)
-            .fetch_all(self.pool.as_ref())
-            .await?;
-        
-        Ok(rows.into_iter().map(|r| r.get::<String, _>("key")).collect())
-    }
-
-    async fn query(&self, sql: &str, params: &[&dyn sqlx::Encode<'_, sqlx::Any>]) -> Result<Vec<HashMap<String, serde_json::Value>>> {
-        let mut query = sqlx::query(sql);
-        for param in params {
-            query = query.bind(param);
-        }
-        let rows = query.fetch_all(self.pool.as_ref()).await?;
-        
-        let mut results = Vec::new();
-        for row in rows {
-            let mut map = HashMap::new();
-            for column in row.columns() {
-                let name = column.name().to_string();
-                let value: serde_json::Value = row.try_get(name.clone())?;
-                map.insert(name, value);
-            }
-            results.push(map);
-        }
-        Ok(results)
-    }
-
-    async fn execute(&self, sql: &str, params: &[&dyn sqlx::Encode<'_, sqlx::Any>]) -> Result<u64> {
-        let mut query = sqlx::query(sql);
-        for param in params {
-            query = query.bind(param);
-        }
-        let result = query.execute(self.pool.as_ref()).await?;
-        Ok(result.rows_affected())
+    fn backend_type(&self) -> StorageBackendType {
+        StorageBackendType::Sqlite
     }
 }

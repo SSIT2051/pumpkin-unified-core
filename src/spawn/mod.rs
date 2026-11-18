@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 pub mod commands;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Spawn {
     pub world: String,
@@ -18,7 +17,6 @@ pub struct Spawn {
 }
 
 pub struct SpawnModule {
-    #[allow(dead_code)]
     storage: Arc<Storage>,
     config: SpawnConfig,
 }

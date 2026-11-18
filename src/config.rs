@@ -1,5 +1,6 @@
 use config::Config as ConfigRs;
 use serde::{Deserialize, Serialize};
+use crate::storage::StorageBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -19,8 +20,23 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageBackendConfig {
+    Json,
+    Sqlite,
+    Redis,
+    Mysql,
+}
+
+impl Default for StorageBackendConfig {
+    fn default() -> Self {
+        Self::Json
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    pub backend: String,
+    pub backend: StorageBackendConfig,
     pub sqlite: SqliteConfig,
     pub redis: RedisConfig,
     pub mysql: MysqlConfig,
@@ -29,7 +45,7 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            backend: "sqlite".to_string(),
+            backend: StorageBackendConfig::default(),
             sqlite: SqliteConfig::default(),
             redis: RedisConfig::default(),
             mysql: MysqlConfig::default(),
@@ -368,23 +384,38 @@ impl Default for EventsConfig {
 }
 
 impl Config {
-    pub fn load() -> Self {
+    /// Load configuration from file (config.yml/toml) and environment variables.
+    /// File takes precedence over env vars, which take precedence over defaults.
+    pub fn load(data_folder: Option<&str>) -> Self {
         let mut builder = ConfigRs::builder();
         
-        // Add environment variable source (PUC_ prefix)
+        // 1. Add file source if data_folder provided
+        if let Some(folder) = data_folder {
+            let config_path = std::path::Path::new(folder).join("config");
+            // Try YAML first, then TOML
+            if config_path.with_extension("yml").exists() {
+                builder = builder.add_source(config::File::from(config_path.with_extension("yml")));
+            } else if config_path.with_extension("yaml").exists() {
+                builder = builder.add_source(config::File::from(config_path.with_extension("yaml")));
+            } else if config_path.with_extension("toml").exists() {
+                builder = builder.add_source(config::File::from(config_path.with_extension("toml")));
+            }
+        }
+        
+        // 2. Add environment variable source (PUC_ prefix) - overrides file
         builder = builder.add_source(config::Environment::with_prefix("PUC").separator("__"));
         
         let config_rs = builder.build().expect("Failed to build configuration");
         
-        // Try to deserialize from environment; fall back to defaults if no env vars set
-        config_rs.try_deserialize().unwrap_or_else(|_| {
-            tracing::debug!("No config environment variables set, using defaults");
+        // Try to deserialize; fall back to defaults if no config set
+        config_rs.try_deserialize().unwrap_or_else(|e| {
+            tracing::warn!("Failed to deserialize config: {}, using defaults", e);
             Self::default()
         })
     }
 
-    pub fn reload(&self) -> Self {
-        Self::load()
+    pub fn reload(&self, data_folder: Option<&str>) -> Self {
+        Self::load(data_folder)
     }
 }
 
@@ -392,7 +423,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             storage: StorageConfig {
-                backend: "sqlite".to_string(),
+                backend: StorageBackendConfig::default(),
                 sqlite: SqliteConfig {
                     path: "plugins/pumpkin-unified-core/data.db".to_string(),
                     max_connections: 10,

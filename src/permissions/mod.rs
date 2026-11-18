@@ -157,7 +157,6 @@ impl Permissions {
         }
     }
 
-    #[allow(dead_code)]
     pub fn delete_group(&self, name: &str) {
         self.storage.delete("groups", name);
     }
@@ -260,7 +259,6 @@ impl Permissions {
 
     // ----- resolution -----
 
-    #[allow(dead_code)]
     fn collect_group_permissions(
         &self,
         name: &str,
@@ -283,7 +281,6 @@ impl Permissions {
     /// (`pumpkin-unified-core:essentials.balance`) or the shorthand form
     /// (`essentials.balance`); stored nodes may use either form as well.
     /// Exact matches override wildcard matches; user nodes override group nodes.
-    #[allow(dead_code)]
     pub fn has_permission(&self, uuid: &str, node: &str) -> bool {
         let user = match self.get_user(uuid) {
             Some(u) => u,
@@ -303,10 +300,17 @@ impl Permissions {
         let mut exact: Option<bool> = None;
         let mut wildcard: Option<bool> = None;
         for perm in &perms {
+            // Check both namespaced and shorthand forms for exact match
             if perm.node == node || perm.node == node_short {
                 exact = Some(perm.value);
-            } else if crate::utils::perm::node_matches(&perm.node, node) {
+            } else if crate::utils::perm::node_matches(&perm.node, node) ||
+                      crate::utils::perm::node_matches(&perm.node, node_short) {
                 wildcard = Some(perm.value);
+            }
+        }
+
+        exact.or(wildcard).unwrap_or(false)
+    }
             }
         }
 

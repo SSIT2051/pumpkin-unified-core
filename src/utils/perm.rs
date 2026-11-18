@@ -44,7 +44,6 @@ pub fn shorthand(perm: &str) -> &str {
 }
 
 /// True when `perm` starts with our namespace segment (`pumpkin-unified-core:`).
-#[allow(dead_code)]
 pub fn is_namespaced(perm: &str) -> bool {
     perm.strip_prefix(PLUGIN_NAMESPACE)
         .is_some_and(|rest| rest.starts_with(':'))

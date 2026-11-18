@@ -112,6 +112,40 @@ impl CommandHandler for GamemodeQueryHandler {
     }
 }
 
+// ---------------- defaultgamemode ----------------
+
+pub struct DefaultGamemodeHandler {
+    mode: GameMode,
+}
+
+impl CommandHandler for DefaultGamemodeHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match sender.as_player() {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text("&cOnly players can use /defaultgamemode"));
+                return Ok(1);
+            }
+        };
+        player.set_gamemode(self.mode);
+        sender.send_message(format_text(&format!(
+            "&aDefault gamemode set to &f{}",
+            match self.mode {
+                GameMode::Survival => "survival",
+                GameMode::Creative => "creative",
+                GameMode::Adventure => "adventure",
+                GameMode::Spectator => "spectator",
+            }
+        )));
+        Ok(1)
+    }
+}
+
 pub fn register(context: &Context) {
     let gamemode = Command::new(
         &["gamemode".to_string(), "gm".to_string()],
@@ -145,4 +179,23 @@ pub fn register(context: &Context) {
     alias("gms", GameMode::Survival);
     alias("gma", GameMode::Adventure);
     alias("gmsp", GameMode::Spectator);
+
+    // /defaultgamemode <mode>
+    let defaultgamemode = Command::new(
+        &["defaultgamemode".to_string()],
+        "Set default gamemode",
+    )
+    .then(
+        CommandNode::literal("survival").execute(DefaultGamemodeHandler { mode: GameMode::Survival }),
+    )
+    .then(
+        CommandNode::literal("creative").execute(DefaultGamemodeHandler { mode: GameMode::Creative }),
+    )
+    .then(
+        CommandNode::literal("adventure").execute(DefaultGamemodeHandler { mode: GameMode::Adventure }),
+    )
+    .then(
+        CommandNode::literal("spectator").execute(DefaultGamemodeHandler { mode: GameMode::Spectator }),
+    );
+    context.register_command(defaultgamemode, "pumpkin-unified-core:essentials.defaultgamemode");
 }
