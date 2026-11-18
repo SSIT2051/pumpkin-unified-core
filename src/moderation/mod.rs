@@ -1,5 +1,6 @@
 //! Moderation module: bans, mutes, kicks, fly, god, heal, feed, vanish.
 
+use crate::config::ModerationConfig;
 use crate::storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,8 +18,15 @@ pub struct Punishment {
     pub expires_at: Option<i64>,
 }
 
+impl Punishment {
+    pub fn is_expired(&self) -> bool {
+        self.expires_at.map(|e| crate::utils::time::now_timestamp() >= e).unwrap_or(false)
+    }
+}
+
 pub struct Moderation {
     storage: Arc<Storage>,
+    config: ModerationConfig,
     state: Mutex<HashMap<String, ModerationState>>,
 }
 
@@ -30,9 +38,10 @@ pub struct ModerationState {
 }
 
 impl Moderation {
-    pub fn new(storage: Arc<Storage>) -> Self {
+    pub fn new(storage: Arc<Storage>, config: ModerationConfig) -> Self {
         Self {
             storage,
+            config,
             state: Mutex::new(HashMap::new()),
         }
     }
@@ -73,10 +82,7 @@ impl Moderation {
     #[allow(dead_code)]
     pub fn is_muted(&self, uuid: &str) -> bool {
         match self.get_punishment(uuid) {
-            Some(p) => {
-                p.kind == "mute"
-                    && p.expires_at.map(|e| crate::utils::time::now_timestamp() < e).unwrap_or(true)
-            }
+            Some(p) => p.kind == "mute" && !p.is_expired(),
             None => false,
         }
     }
@@ -100,5 +106,25 @@ impl Moderation {
 
     pub fn set_vanished(&self, uuid: &str, vanished: bool) {
         self.state.lock().unwrap().entry(uuid.to_string()).or_default().vanished = vanished;
+    }
+
+    pub fn ban_message(&self) -> &str {
+        &self.config.ban_message
+    }
+
+    pub fn mute_message(&self) -> &str {
+        &self.config.mute_message
+    }
+
+    pub fn jail_message(&self) -> &str {
+        &self.config.jail_message
+    }
+
+    pub fn max_tempban_duration(&self) -> u64 {
+        self.config.max_tempban_duration
+    }
+
+    pub fn max_tempmute_duration(&self) -> u64 {
+        self.config.max_tempmute_duration
     }
 }

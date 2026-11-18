@@ -5,7 +5,9 @@ use pumpkin_plugin_api::{
 use std::sync::Arc;
 
 mod chat;
+mod config;
 mod economy;
+mod events;
 mod gamemode;
 mod homes;
 mod kits;
@@ -19,7 +21,10 @@ mod utils;
 mod warps;
 
 use chat::Chat;
+use config::Config;
 use economy::Economy;
+use events::EventModule;
+use gamemode::Gamemode;
 use homes::Homes;
 use kits::Kits;
 use moderation::Moderation;
@@ -51,19 +56,37 @@ impl Plugin for UnifiedPlugin {
     fn on_load(&self, context: Context) -> Result<()> {
         tracing::info!("Loading pumpkin-unified-core...");
 
+        // Load configuration.
+        let config = Arc::new(Config::load());
         let data_folder = context.get_data_folder();
         let storage = Arc::new(Storage::new(&data_folder));
 
-        let economy = Arc::new(Economy::new(storage.clone()));
-        let warps = Arc::new(Warps::new(storage.clone()));
-        let homes = Arc::new(Homes::new(storage.clone()));
-        let tpa = Arc::new(Tpa::new(storage.clone()));
-        let kits = Arc::new(Kits::new(storage.clone()));
-        let moderation = Arc::new(Moderation::new(storage.clone()));
-        let permissions = Arc::new(Permissions::new(storage.clone()));
-        let spawn = Arc::new(SpawnModule::new(storage.clone()));
-        let utility = Arc::new(Utility::new(storage.clone()));
-        let chat = Arc::new(Chat::new(storage.clone()));
+        let economy = Arc::new(Economy::new(storage.clone(), config.economy.clone()));
+        let warps = Arc::new(Warps::new(storage.clone(), config.warps.clone()));
+        let homes = Arc::new(Homes::new(storage.clone(), config.homes.clone()));
+        let tpa = Arc::new(Tpa::new(storage.clone(), config.tpa.clone()));
+        let kits = Arc::new(Kits::new(storage.clone(), config.kits.clone()));
+        let moderation = Arc::new(Moderation::new(storage.clone(), config.moderation.clone()));
+        let permissions = Arc::new(Permissions::new(storage.clone(), config.permissions.clone()));
+        let spawn = Arc::new(SpawnModule::new(storage.clone(), config.spawn.clone()));
+        let utility = Arc::new(Utility::new(storage.clone(), config.utility.clone()));
+        let chat = Arc::new(Chat::new(storage.clone(), config.chat.clone()));
+
+        // Register event handlers.
+        let event_module = EventModule::new(
+            economy.clone(),
+            warps.clone(),
+            homes.clone(),
+            tpa.clone(),
+            kits.clone(),
+            moderation.clone(),
+            permissions.clone(),
+            spawn.clone(),
+            utility.clone(),
+            chat.clone(),
+            config.events.clone(),
+        );
+        event_module.register_handlers(&context);
 
         // Register commands.
         permissions::commands::register(permissions.clone(), &context);

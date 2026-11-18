@@ -41,11 +41,11 @@ impl CommandHandler for SetHomeHandler {
             }
         };
         let owner = player.get_name();
-        if self.homes.get(&owner, &name).is_none() && self.homes.count(&owner) >= self.homes.max_homes()
+        if self.homes.get(&owner, &name).is_none() && self.homes.count(&owner) >= self.homes.max_homes_default()
         {
             sender.send_message(format_text(&format!(
                 "&cYou have reached the maximum of {} homes",
-                self.homes.max_homes()
+                self.homes.max_homes_default()
             )));
             return Ok(1);
         }

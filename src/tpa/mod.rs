@@ -1,5 +1,6 @@
 //! TPA module: teleport request (tpa) system.
 
+use crate::config::TpaConfig;
 use crate::storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,17 +23,17 @@ pub struct Tpa {
     #[allow(dead_code)]
     storage: Arc<Storage>,
     requests: Mutex<HashMap<String, TpaRequest>>,
-    timeout_seconds: i64,
     enabled: Mutex<HashMap<String, bool>>,
+    config: TpaConfig,
 }
 
 impl Tpa {
-    pub fn new(storage: Arc<Storage>) -> Self {
+    pub fn new(storage: Arc<Storage>, config: TpaConfig) -> Self {
         Self {
             storage,
             requests: Mutex::new(HashMap::new()),
-            timeout_seconds: 60,
             enabled: Mutex::new(HashMap::new()),
+            config,
         }
     }
 
@@ -64,7 +65,7 @@ impl Tpa {
             target_uuid: target_uuid.clone(),
             here,
             created_at: now,
-            expires_at: now + self.timeout_seconds,
+            expires_at: now + self.config.request_timeout as i64,
         };
         self.requests
             .lock()
@@ -78,5 +79,24 @@ impl Tpa {
 
     pub fn deny(&self, target_uuid: &str) -> Option<TpaRequest> {
         self.requests.lock().unwrap().remove(target_uuid)
+    }
+
+    pub fn request_timeout(&self) -> u64 {
+        self.config.request_timeout
+    }
+
+    pub fn teleport_cooldown(&self) -> u64 {
+        self.config.teleport_cooldown
+    }
+
+    pub fn get_cooldown_remaining(&self, _uuid: &str) -> Option<u64> {
+        // Check if player has recent TPA teleport
+        // This would need a cooldown tracking system
+        None
+    }
+
+    pub fn cleanup_player_requests(&self, uuid: &str) {
+        let mut requests = self.requests.lock().unwrap();
+        requests.retain(|_, req| req.target_uuid != uuid && req.requester_uuid != uuid);
     }
 }

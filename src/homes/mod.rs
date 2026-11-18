@@ -1,5 +1,6 @@
 //! Homes module: per-player personal teleport locations.
 
+use crate::config::HomesConfig;
 use crate::storage::Storage;
 use std::sync::Arc;
 
@@ -19,14 +20,14 @@ pub struct Home {
 
 pub struct Homes {
     storage: Arc<Storage>,
-    max_homes: usize,
+    config: HomesConfig,
 }
 
 impl Homes {
-    pub fn new(storage: Arc<Storage>) -> Self {
+    pub fn new(storage: Arc<Storage>, config: HomesConfig) -> Self {
         Self {
             storage,
-            max_homes: 3,
+            config,
         }
     }
 
@@ -64,7 +65,15 @@ impl Homes {
         self.list(owner).len()
     }
 
-    pub fn max_homes(&self) -> usize {
-        self.max_homes
+    pub fn max_homes_default(&self) -> usize {
+        self.config.max_homes_default
+    }
+
+    pub fn max_homes_vip(&self) -> usize {
+        self.config.max_homes_vip
+    }
+
+    pub fn home_cooldown(&self) -> u64 {
+        self.config.home_cooldown
     }
 }

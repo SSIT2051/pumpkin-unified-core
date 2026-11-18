@@ -1,5 +1,6 @@
 //! Spawn module: shared world spawn teleport point.
 
+use crate::config::SpawnConfig;
 use crate::storage::Storage;
 use std::sync::Arc;
 
@@ -19,10 +20,23 @@ pub struct Spawn {
 pub struct SpawnModule {
     #[allow(dead_code)]
     storage: Arc<Storage>,
+    config: SpawnConfig,
 }
 
 impl SpawnModule {
-    pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<Storage>, config: SpawnConfig) -> Self {
+        Self { storage, config }
+    }
+
+    pub fn respawn_at_home(&self) -> bool {
+        self.config.respawn_at_home
+    }
+
+    pub fn bed_priority(&self) -> bool {
+        self.config.bed_priority
+    }
+
+    pub fn spawn_location(&self) -> Option<&crate::config::LocationConfig> {
+        self.config.spawn_location.as_ref()
     }
 }

@@ -4,6 +4,7 @@
 //! file-based [`Storage`]. All operations are synchronous; the WASM plugin API
 //! delivers command handlers on a single thread.
 
+use crate::config::EconomyConfig;
 use crate::storage::Storage;
 use std::sync::Arc;
 
@@ -19,28 +20,20 @@ pub struct EconomyAccount {
 
 pub struct Economy {
     storage: Arc<Storage>,
-    starting_balance: f64,
-    min_money: f64,
-    max_money: f64,
-    currency_symbol: String,
-    currency_format: String,
+    config: EconomyConfig,
 }
 
 impl Default for Economy {
     fn default() -> Self {
-        Self::new(Arc::new(Storage::new(".")))
+        Self::new(Arc::new(Storage::new(".")), EconomyConfig::default())
     }
 }
 
 impl Economy {
-    pub fn new(storage: Arc<Storage>) -> Self {
+    pub fn new(storage: Arc<Storage>, config: EconomyConfig) -> Self {
         Self {
             storage,
-            starting_balance: 0.0,
-            min_money: 0.0,
-            max_money: f64::MAX,
-            currency_symbol: "$".to_string(),
-            currency_format: "{symbol}{amount}".to_string(),
+            config,
         }
     }
 
@@ -56,12 +49,12 @@ impl Economy {
         {
             return account.balance;
         }
-        self.starting_balance
+        self.config.starting_balance
     }
 
     /// Sets the balance for `uuid`, clamped to the configured min/max.
     pub fn set_balance(&self, uuid: &str, name: &str, amount: f64) -> f64 {
-        let clamped = amount.clamp(self.min_money, self.max_money);
+        let clamped = amount.clamp(self.config.min_money, self.config.max_money);
         let account = EconomyAccount {
             uuid: uuid.to_string(),
             name: name.to_string(),
@@ -74,7 +67,7 @@ impl Economy {
 
     /// Adds `amount` to the balance and returns the new balance.
     pub fn add_balance(&self, uuid: &str, name: &str, amount: f64) -> f64 {
-        let new_balance = (self.get_balance(uuid) + amount).clamp(self.min_money, self.max_money);
+        let new_balance = (self.get_balance(uuid) + amount).clamp(self.config.min_money, self.config.max_money);
         self.set_balance(uuid, name, new_balance)
     }
 
@@ -115,8 +108,8 @@ impl Economy {
 
     /// Formats an amount using the configured currency symbol/format.
     pub fn format_money(&self, amount: f64) -> String {
-        self.currency_format
-            .replace("{symbol}", &self.currency_symbol)
+        self.config.currency_format
+            .replace("{symbol}", &self.config.currency_symbol)
             .replace("{amount}", &format!("{amount:.2}"))
     }
 }

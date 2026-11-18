@@ -1,5 +1,6 @@
 //! Warps module: named teleport locations.
 
+use crate::config::WarpsConfig;
 use crate::storage::Storage;
 use std::sync::Arc;
 
@@ -20,11 +21,12 @@ pub struct Warp {
 
 pub struct Warps {
     storage: Arc<Storage>,
+    config: WarpsConfig,
 }
 
 impl Warps {
-    pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<Storage>, config: WarpsConfig) -> Self {
+        Self { storage, config }
     }
 
     pub fn get(&self, name: &str) -> Option<Warp> {
@@ -46,5 +48,13 @@ impl Warps {
 
     pub fn list(&self) -> Vec<Warp> {
         self.storage.values("warps")
+    }
+
+    pub fn max_warps_per_player(&self) -> usize {
+        self.config.max_warps_per_player
+    }
+
+    pub fn warp_cooldown(&self) -> u64 {
+        self.config.warp_cooldown
     }
 }

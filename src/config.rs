@@ -1,8 +1,6 @@
-use crate::utils::macros::*;
 use config::{Config as ConfigRs, File, FileFormat};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -29,10 +27,30 @@ pub struct StorageConfig {
     pub mysql: MysqlConfig,
 }
 
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            backend: "sqlite".to_string(),
+            sqlite: SqliteConfig::default(),
+            redis: RedisConfig::default(),
+            mysql: MysqlConfig::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqliteConfig {
     pub path: String,
     pub max_connections: u32,
+}
+
+impl Default for SqliteConfig {
+    fn default() -> Self {
+        Self {
+            path: "plugins/pumpkin-unified-core/data.db".to_string(),
+            max_connections: 10,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,10 +59,28 @@ pub struct RedisConfig {
     pub max_connections: u32,
 }
 
+impl Default for RedisConfig {
+    fn default() -> Self {
+        Self {
+            url: "redis://127.0.0.1:6379".to_string(),
+            max_connections: 10,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MysqlConfig {
     pub url: String,
     pub max_connections: u32,
+}
+
+impl Default for MysqlConfig {
+    fn default() -> Self {
+        Self {
+            url: "mysql://user:pass@localhost/pumpkin".to_string(),
+            max_connections: 10,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,11 +93,34 @@ pub struct EconomyConfig {
     pub log_transactions: bool,
 }
 
+impl Default for EconomyConfig {
+    fn default() -> Self {
+        Self {
+            starting_balance: 100.0,
+            currency_symbol: "$".to_string(),
+            currency_format: "{symbol}{amount}".to_string(),
+            max_money: 1_000_000_000.0,
+            min_money: 0.0,
+            log_transactions: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WarpsConfig {
     pub max_warps_per_player: usize,
     pub warp_cooldown: u64,
     pub per_warp_permissions: bool,
+}
+
+impl Default for WarpsConfig {
+    fn default() -> Self {
+        Self {
+            max_warps_per_player: 10,
+            warp_cooldown: 5,
+            per_warp_permissions: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +131,17 @@ pub struct HomesConfig {
     pub home_on_death: bool,
 }
 
+impl Default for HomesConfig {
+    fn default() -> Self {
+        Self {
+            max_homes_default: 3,
+            max_homes_vip: 10,
+            home_cooldown: 5,
+            home_on_death: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TpaConfig {
     pub request_timeout: u64,
@@ -79,10 +149,29 @@ pub struct TpaConfig {
     pub cross_world: bool,
 }
 
+impl Default for TpaConfig {
+    fn default() -> Self {
+        Self {
+            request_timeout: 30,
+            teleport_cooldown: 5,
+            cross_world: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KitsConfig {
     pub default_cooldown: u64,
     pub kit_signs: bool,
+}
+
+impl Default for KitsConfig {
+    fn default() -> Self {
+        Self {
+            default_cooldown: 86400,
+            kit_signs: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +184,19 @@ pub struct ModerationConfig {
     pub max_tempmute_duration: u64,
 }
 
+impl Default for ModerationConfig {
+    fn default() -> Self {
+        Self {
+            ban_message: "You have been banned from this server.".to_string(),
+            mute_message: "You have been muted.".to_string(),
+            jail_message: "You have been jailed.".to_string(),
+            jail_location: None,
+            max_tempban_duration: 2592000,
+            max_tempmute_duration: 2592000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocationConfig {
     pub world: String,
@@ -105,9 +207,30 @@ pub struct LocationConfig {
     pub pitch: f32,
 }
 
+impl Default for LocationConfig {
+    fn default() -> Self {
+        Self {
+            world: "world".to_string(),
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 0.0,
+            pitch: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GamemodeConfig {
     pub default: String,
+}
+
+impl Default for GamemodeConfig {
+    fn default() -> Self {
+        Self {
+            default: "survival".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,16 +241,45 @@ pub struct PermissionsConfig {
     pub tracks: Vec<TrackConfig>,
 }
 
+impl Default for PermissionsConfig {
+    fn default() -> Self {
+        Self {
+            enable_contexts: true,
+            default_group: "default".to_string(),
+            inheritance: InheritanceConfig::default(),
+            tracks: vec![],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InheritanceConfig {
     pub max_depth: usize,
     pub order: String,
 }
 
+impl Default for InheritanceConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: 10,
+            order: "depth-first".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackConfig {
     pub name: String,
     pub groups: Vec<String>,
+}
+
+impl Default for TrackConfig {
+    fn default() -> Self {
+        Self {
+            name: "default".to_string(),
+            groups: vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +289,16 @@ pub struct SpawnConfig {
     pub bed_priority: bool,
 }
 
+impl Default for SpawnConfig {
+    fn default() -> Self {
+        Self {
+            spawn_location: None,
+            respawn_at_home: false,
+            bed_priority: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UtilityConfig {
     pub afk_timeout: u64,
@@ -144,6 +306,18 @@ pub struct UtilityConfig {
     pub motd: String,
     pub rules: Vec<String>,
     pub max_players: u32,
+}
+
+impl Default for UtilityConfig {
+    fn default() -> Self {
+        Self {
+            afk_timeout: 300,
+            afk_kick_timeout: None,
+            motd: "Welcome to the server!".to_string(),
+            rules: vec!["Be respectful".to_string(), "No cheating".to_string()],
+            max_players: 20,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +330,19 @@ pub struct ChatConfig {
     pub spam_threshold: u32,
 }
 
+impl Default for ChatConfig {
+    fn default() -> Self {
+        Self {
+            format: "&8[&7{group}&8] &r{prefix}&r{player}&r: &f{message}".to_string(),
+            broadcast_format: "&4[Broadcast] &r{message}".to_string(),
+            private_message_format: "&8[&bPM&8] &r{from}&r -> &r{to}&r: &f{message}".to_string(),
+            chat_radius: None,
+            anti_spam: true,
+            spam_threshold: 5,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventsConfig {
     pub player_join_message: Option<String>,
@@ -163,6 +350,18 @@ pub struct EventsConfig {
     pub death_messages: bool,
     pub keep_inventory: bool,
     pub anti_build: bool,
+}
+
+impl Default for EventsConfig {
+    fn default() -> Self {
+        Self {
+            player_join_message: Some("&a{player} joined the game".to_string()),
+            player_leave_message: Some("&c{player} left the game".to_string()),
+            death_messages: true,
+            keep_inventory: false,
+            anti_build: true,
+        }
+    }
 }
 
 impl Config {

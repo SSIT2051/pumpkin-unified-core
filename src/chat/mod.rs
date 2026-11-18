@@ -1,5 +1,6 @@
 //! Chat module: private messaging, mail, and broadcasts.
 
+use crate::config::ChatConfig;
 use crate::storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,13 +19,15 @@ pub struct Mail {
 
 pub struct Chat {
     storage: Arc<Storage>,
+    config: ChatConfig,
     reply_targets: Mutex<HashMap<String, String>>,
 }
 
 impl Chat {
-    pub fn new(storage: Arc<Storage>) -> Self {
+    pub fn new(storage: Arc<Storage>, config: ChatConfig) -> Self {
         Self {
             storage,
+            config,
             reply_targets: Mutex::new(HashMap::new()),
         }
     }
@@ -66,5 +69,30 @@ impl Chat {
         }
         self.storage.set("chat", &key, &mails);
         mails
+    }
+
+    pub fn format(&self) -> &str {
+        &self.config.format
+    }
+
+    pub fn broadcast_format(&self) -> &str {
+        &self.config.broadcast_format
+    }
+
+    pub fn private_message_format(&self) -> &str {
+        &self.config.private_message_format
+    }
+
+    pub fn anti_spam_enabled(&self) -> bool {
+        self.config.anti_spam
+    }
+
+    pub async fn is_spam(&self, uuid: &str, message: &str) -> bool {
+        // Simple spam detection - could be enhanced
+        if !self.config.anti_spam {
+            return false;
+        }
+        // Basic check - could track message history
+        false
     }
 }

@@ -4,6 +4,7 @@
 //! resolves effective permissions with wildcard matching. Data is persisted via
 //! the file-based [`Storage`].
 
+use crate::config::PermissionsConfig;
 use crate::storage::Storage;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -37,6 +38,10 @@ pub struct GroupData {
     pub weight: i32,
     #[serde(default)]
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub prefix: Option<String>,
+    #[serde(default)]
+    pub suffix: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -48,14 +53,16 @@ pub struct TrackData {
 
 pub struct Permissions {
     storage: Arc<Storage>,
+    config: PermissionsConfig,
     default_group: String,
 }
 
 impl Permissions {
-    pub fn new(storage: Arc<Storage>) -> Self {
+    pub fn new(storage: Arc<Storage>, config: PermissionsConfig) -> Self {
         let perms = Self {
             storage,
-            default_group: "default".to_string(),
+            config: config.clone(),
+            default_group: config.default_group.clone(),
         };
         perms.ensure_default_group();
         perms
@@ -143,6 +150,8 @@ impl Permissions {
                 parents: Vec::new(),
                 weight: 0,
                 display_name: None,
+                prefix: None,
+                suffix: None,
             };
             self.storage.set("groups", name, &group);
         }
@@ -202,6 +211,20 @@ impl Permissions {
         }
     }
 
+    pub fn set_group_prefix(&self, name: &str, prefix: String) {
+        if let Some(mut group) = self.get_group(name) {
+            group.prefix = Some(prefix);
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    pub fn set_group_suffix(&self, name: &str, suffix: String) {
+        if let Some(mut group) = self.get_group(name) {
+            group.suffix = Some(suffix);
+            self.storage.set("groups", name, &group);
+        }
+    }
+
     // ----- tracks -----
 
     pub fn create_track(&self, name: &str) {
@@ -257,7 +280,7 @@ impl Permissions {
 
     /// Resolves whether `uuid` has `node`, considering group inheritance and
     /// wildcards. `node` may be given in the fully namespaced form
-    /// (`pumpkin-unified-core.essentials.balance`) or the shorthand form
+    /// (`pumpkin-unified-core:essentials.balance`) or the shorthand form
     /// (`essentials.balance`); stored nodes may use either form as well.
     /// Exact matches override wildcard matches; user nodes override group nodes.
     #[allow(dead_code)]
@@ -288,5 +311,36 @@ impl Permissions {
         }
 
         exact.or(wildcard).unwrap_or(false)
+    }
+
+    // ----- meta (prefix/suffix) -----
+
+    pub fn get_prefix(&self, uuid: &str) -> Option<String> {
+        let user = self.get_user(uuid)?;
+        for group in &user.groups {
+            if let Some(group_data) = self.get_group(group) {
+                if let Some(prefix) = group_data.prefix {
+                    return Some(prefix);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_suffix(&self, uuid: &str) -> Option<String> {
+        let user = self.get_user(uuid)?;
+        for group in &user.groups {
+            if let Some(group_data) = self.get_group(group) {
+                if let Some(suffix) = group_data.suffix {
+                    return Some(suffix);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_primary_group(&self, uuid: &str) -> Option<String> {
+        let user = self.get_user(uuid)?;
+        user.groups.first().cloned()
     }
 }
