@@ -4,14 +4,31 @@ use pumpkin_plugin_api::{
 };
 use std::sync::Arc;
 
+mod chat;
 mod economy;
+mod gamemode;
+mod homes;
+mod kits;
+mod moderation;
 mod permissions;
+mod spawn;
 mod storage;
+mod tpa;
+mod utility;
 mod utils;
+mod warps;
 
+use chat::Chat;
 use economy::Economy;
+use homes::Homes;
+use kits::Kits;
+use moderation::Moderation;
 use permissions::Permissions;
+use spawn::SpawnModule;
 use storage::Storage;
+use tpa::Tpa;
+use utility::Utility;
+use warps::Warps;
 
 pub struct UnifiedPlugin;
 
@@ -36,11 +53,30 @@ impl Plugin for UnifiedPlugin {
 
         let data_folder = context.get_data_folder();
         let storage = Arc::new(Storage::new(&data_folder));
-        let economy = Arc::new(Economy::new(storage.clone()));
-        let permissions = Arc::new(Permissions::new(storage.clone()));
 
+        let economy = Arc::new(Economy::new(storage.clone()));
+        let warps = Arc::new(Warps::new(storage.clone()));
+        let homes = Arc::new(Homes::new(storage.clone()));
+        let tpa = Arc::new(Tpa::new(storage.clone()));
+        let kits = Arc::new(Kits::new(storage.clone()));
+        let moderation = Arc::new(Moderation::new(storage.clone()));
+        let permissions = Arc::new(Permissions::new(storage.clone()));
+        let spawn = Arc::new(SpawnModule::new(storage.clone()));
+        let utility = Arc::new(Utility::new(storage.clone()));
+        let chat = Arc::new(Chat::new(storage.clone()));
+
+        // Register commands.
         permissions::commands::register(permissions.clone(), &context);
         economy::commands::register(economy.clone(), &context);
+        warps::commands::register(warps.clone(), &context);
+        homes::commands::register(homes.clone(), &context);
+        tpa::commands::register(tpa.clone(), &context);
+        kits::commands::register(kits.clone(), &context);
+        moderation::commands::register(moderation.clone(), &context);
+        gamemode::commands::register(&context);
+        spawn::commands::register(spawn.clone(), &context);
+        utility::commands::register(utility.clone(), &context);
+        chat::commands::register(chat.clone(), &context);
 
         register_permissions(&context)?;
 
@@ -68,14 +104,71 @@ fn register_permissions(context: &Context) -> Result<()> {
     let op = || PermissionDefault::Op(PermissionLevel::Four);
 
     let perms = vec![
+        // Economy
         permission("essentials.balance", "Check your balance", allow),
         permission("essentials.balance.others", "Check others' balances", allow),
         permission("essentials.pay", "Pay another player", allow),
         permission("essentials.balancetop", "Show top balances", allow),
         permission("essentials.eco", "Economy admin", op()),
-        permission("essentials.eco.give", "Give money", op()),
-        permission("essentials.eco.take", "Take money", op()),
-        permission("essentials.eco.set", "Set balance", op()),
+        // Warps
+        permission("essentials.warp", "Use warps", allow),
+        permission("essentials.setwarp", "Create warps", op()),
+        permission("essentials.delwarp", "Delete warps", op()),
+        permission("essentials.warps", "List warps", allow),
+        // Homes
+        permission("essentials.home", "Teleport to home", allow),
+        permission("essentials.sethome", "Set a home", allow),
+        permission("essentials.delhome", "Delete a home", allow),
+        permission("essentials.homes", "List homes", allow),
+        // TPA
+        permission("essentials.tpa", "Request teleport", allow),
+        permission("essentials.tpahere", "Request teleport here", allow),
+        permission("essentials.tpaccept", "Accept teleport request", allow),
+        permission("essentials.tpdeny", "Deny teleport request", allow),
+        permission("essentials.tptoggle", "Toggle teleport requests", allow),
+        // Kits
+        permission("essentials.kit", "Use kits", allow),
+        permission("essentials.kits", "List kits", allow),
+        permission("essentials.createkit", "Create kits", op()),
+        permission("essentials.showkit", "Show kit contents", op()),
+        // Moderation
+        permission("essentials.kick", "Kick players", op()),
+        permission("essentials.ban", "Ban players", op()),
+        permission("essentials.tempban", "Temporarily ban players", op()),
+        permission("essentials.unban", "Unban players", op()),
+        permission("essentials.mute", "Mute players", op()),
+        permission("essentials.unmute", "Unmute players", op()),
+        permission("essentials.fly", "Toggle flight", op()),
+        permission("essentials.god", "Toggle god mode", op()),
+        permission("essentials.heal", "Heal players", op()),
+        permission("essentials.feed", "Feed players", op()),
+        permission("essentials.vanish", "Toggle vanish", op()),
+        // Gamemode
+        permission("essentials.gamemode", "Change gamemode", op()),
+        // Spawn
+        permission("essentials.spawn", "Teleport to spawn", allow),
+        permission("essentials.setspawn", "Set spawn point", op()),
+        // Utility
+        permission("essentials.afk", "Toggle AFK", allow),
+        permission("essentials.rules", "View rules", allow),
+        permission("essentials.motd", "View MOTD", allow),
+        permission("essentials.list", "List players", allow),
+        permission("essentials.whois", "View player info", allow),
+        permission("essentials.speed", "Set speed", op()),
+        permission("essentials.compass", "Show position", allow),
+        permission("essentials.top", "Teleport to top", allow),
+        permission("essentials.seen", "Check last seen", allow),
+        permission("essentials.weather", "Change weather", op()),
+        permission("essentials.time", "Change time", op()),
+        permission("essentials.butcher", "Kill mobs", op()),
+        permission("essentials.extinguish", "Extinguish fires", op()),
+        // Chat
+        permission("essentials.msg", "Send private messages", allow),
+        permission("essentials.reply", "Reply to messages", allow),
+        permission("essentials.mail", "Manage mail", allow),
+        permission("essentials.broadcast", "Broadcast messages", op()),
+        permission("essentials.broadcastworld", "Broadcast to world", op()),
+        // LuckPerms
         permission("luckperms.admin", "LuckPerms administration", op()),
         permission("luckperms.user.info", "View user info", op()),
         permission("luckperms.user.permission", "Manage user permissions", op()),

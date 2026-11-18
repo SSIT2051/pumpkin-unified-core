@@ -13,19 +13,21 @@ Pumpkin plugin documentation exactly.
 | Module | Commands | Status |
 |--------|----------|--------|
 | Economy | `/balance`, `/bal`, `/money`, `/pay`, `/baltop`, `/eco give\|take\|set` | ✅ ported |
+| Warps | `/warp`, `/setwarp`, `/delwarp`, `/warps` | ✅ ported |
+| Homes | `/sethome`, `/home`, `/delhome`, `/homes` | ✅ ported |
+| TPA | `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/tptoggle` | ✅ ported |
+| Kits | `/kit`, `/kits`, `/createkit`, `/showkit` | ✅ ported |
+| Moderation | `/kick`, `/ban`, `/tempban`, `/unban`, `/mute`, `/unmute`, `/fly`, `/god`, `/heal`, `/feed`, `/vanish` | ✅ ported |
+| Gamemode | `/gamemode`, `/gmc`, `/gms`, `/gma`, `/gmsp` | ✅ ported |
+| Utility | `/afk`, `/rules`, `/motd`, `/list`, `/whois`, `/speed`, `/compass`, `/top`, `/seen`, `/weather`, `/time`, `/butcher`, `/extinguish` | ✅ ported |
+| Chat | `/msg`, `/r`, `/mail`, `/broadcast`, `/broadcastworld` | ✅ ported |
+| Spawn | `/spawn`, `/setspawn` | ✅ ported |
 | LuckPerms (core) | `/lp user/group/track ...`, `/lp sync`, `/lp info` | ✅ ported |
-| Warps | `/warp`, `/setwarp`, `/delwarp`, `/warps` | ⏳ pending |
-| Homes | `/sethome`, `/home`, `/delhome`, `/homes` | ⏳ pending |
-| TPA | `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/tptoggle` | ⏳ pending |
-| Kits | `/kit`, `/kits`, `/createkit`, `/showkit` | ⏳ pending |
-| Moderation | `/kick`, `/ban`, `/tempban`, `/unban`, `/mute`, `/unmute`, ... | ⏳ pending |
-| Gamemode | `/gamemode`, `/gmc`, `/gms`, `/gma`, `/gmsp` | ⏳ pending |
-| Utility | `/afk`, `/rules`, `/motd`, `/list`, `/whois`, ... | ⏳ pending |
-| Chat | `/msg`, `/r`, `/mail`, `/broadcast` | ⏳ pending |
-| Spawn | `/spawn`, `/setspawn` | ⏳ pending |
 
-The remaining modules are ported incrementally following the same pattern as the
-economy and permissions modules (see `src/economy/` and `src/permissions/`).
+All modules are ported to the real Pumpkin WASM plugin API. `butcher`, `extinguish`,
+and `top` are stubs that notify the player (they require entity/block APIs not yet
+wired). Kits currently store item *names* and notify on use; actual item granting
+will use the inventory API in a follow-up.
 
 ## Architecture
 

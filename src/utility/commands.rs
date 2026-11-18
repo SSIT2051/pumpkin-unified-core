@@ -1,349 +1,469 @@
-use crate::utility::UtilityModule;
-use crate::utils::macros::*;
 use crate::utils::text::format_text;
+use crate::utility::Utility;
 use pumpkin_plugin_api::{
-    command::{Command, CommandSender},
-    context::Context,
-    server::Server,
+    command::{
+        Arg, ArgumentType, Command, CommandError, CommandNode, CommandSender, ConsumedArgs,
+        StringType,
+    },
+    commands::CommandHandler,
+    Context, Server,
 };
 use std::sync::Arc;
-use uuid::Uuid;
 
-pub fn register(module: Arc<UtilityModule>, context: &mut Context) {
-    let module_clone = module.clone();
-    let afk_cmd = Command::new("afk")
-        .permission("essentials.afk")
-        .description("Toggle AFK status")
-        .argument("player")
-        .handler(async_handler!(move |sender, server, args| {
-            let target = if args.is_empty() {
-                sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?
+fn arg_string(args: &ConsumedArgs, key: &str) -> Option<String> {
+    match args.get_value(key) {
+        Arg::Simple(s) | Arg::Msg(s) => Some(s),
+        _ => None,
+    }
+}
+
+fn string_arg(name: &str) -> CommandNode {
+    CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord))
+}
+
+fn mode_name(mode: pumpkin_plugin_api::common::GameMode) -> &'static str {
+    use pumpkin_plugin_api::common::GameMode;
+    match mode {
+        GameMode::Survival => "survival",
+        GameMode::Creative => "creative",
+        GameMode::Adventure => "adventure",
+        GameMode::Spectator => "spectator",
+    }
+}
+
+fn require_player(
+    sender: &CommandSender,
+) -> Option<pumpkin_plugin_api::player::Player> {
+    match sender.as_player() {
+        Some(p) => Some(p),
+        None => {
+            sender.send_message(format_text("&cOnly players can use this command"));
+            None
+        }
+    }
+}
+
+// ---------------- afk ----------------
+
+pub struct AfkHandler {
+    utility: Arc<Utility>,
+}
+
+impl CommandHandler for AfkHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        if let Some(player) = require_player(&sender) {
+            let uuid = player.get_id().to_string();
+            let name = player.get_name();
+            let current = self.utility.get_player(&uuid).map(|p| p.afk).unwrap_or(false);
+            let new_state = !current;
+            self.utility.set_afk(&uuid, &name, new_state);
+            sender.send_message(format_text(if new_state {
+                "&eYou are now AFK"
             } else {
-                server.get_player(args[0]).ok_or_else(|| anyhow::anyhow!("Player not found: {}", args[0]))?
-            };
-            
-            let afk = target.is_afk();
-            target.set_afk(!afk).await?;
-            
-            let msg = if !afk { "&aYou are now AFK" } else { "&aYou are no longer AFK" };
-            sender.send_message(&format_text(msg));
-            if target != sender.as_player().unwrap() {
-                target.send_message(&format_text(msg));
+                "&aYou are no longer AFK"
+            }));
+        }
+        Ok(1)
+    }
+}
+
+// ---------------- rules ----------------
+
+pub struct RulesHandler {
+    utility: Arc<Utility>,
+}
+
+impl CommandHandler for RulesHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text("&6&lServer Rules"));
+        sender.send_message(format_text(&format!(
+            "&e{}",
+            self.utility.rules()
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- motd ----------------
+
+pub struct MotdHandler {
+    utility: Arc<Utility>,
+}
+
+impl CommandHandler for MotdHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text(&format!(
+            "&6MOTD: &e{}",
+            self.utility.motd()
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- list ----------------
+
+pub struct ListHandler;
+
+impl CommandHandler for ListHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let players = server.get_all_players();
+        sender.send_message(format_text(&format!(
+            "&6Online players ({}/{}):",
+            players.len(),
+            server.get_max_players()
+        )));
+        let names: Vec<String> = players.iter().map(|p| p.get_name()).collect();
+        sender.send_message(format_text(&format!("&e{}", names.join(", "))));
+        Ok(1)
+    }
+}
+
+// ---------------- whois ----------------
+
+pub struct WhoisHandler;
+
+impl CommandHandler for WhoisHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let name = arg_string(&args, "target").unwrap_or_default();
+        match server.get_player_by_name(&name) {
+            Some(player) => {
+                sender.send_message(format_text(&format!(
+                    "&6Player: &f{}",
+                    player.get_name()
+                )));
+                sender.send_message(format_text(&format!(
+                    "&7UUID: &f{}",
+                    player.get_id().to_string()
+                )));
+                sender.send_message(format_text(&format!(
+                    "&7Gamemode: &f{}",
+                    mode_name(player.get_gamemode())
+                )));
+                sender.send_message(format_text(&format!(
+                    "&7Ping: &f{}ms",
+                    player.get_ping()
+                )));
+                sender.send_message(format_text(&format!(
+                    "&7Health: &f{}/{}",
+                    player.get_health(),
+                    player.get_max_health()
+                )));
             }
-            Ok(())
-        }))
-        .build();
-    context.register_command(afk_cmd);
+            None => sender.send_message(format_text(&format!(
+                "&cPlayer not found: {name}"
+            ))),
+        }
+        Ok(1)
+    }
+}
 
-    let module_clone = module.clone();
-    let rules_cmd = Command::new("rules")
-        .permission("essentials.rules")
-        .description("Show server rules")
-        .handler(async_handler!(move |sender, _server, _args| {
-            sender.send_message(&format_text("&6&l--- Server Rules ---"));
-            for (i, rule) in module_clone.config.rules.iter().enumerate() {
-                sender.send_message(&format_text("&e{}. {}", i + 1, rule));
+// ---------------- speed ----------------
+
+pub struct SpeedHandler;
+
+impl CommandHandler for SpeedHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match require_player(&sender) {
+            Some(p) => p,
+            None => return Ok(1),
+        };
+        let speed: f32 = arg_string(&args, "speed")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0);
+        let speed = speed.clamp(0.1, 10.0);
+        player.set_walk_speed(speed);
+        sender.send_message(format_text(&format!(
+            "&aSet walk speed to &f{speed}"
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- compass ----------------
+
+pub struct CompassHandler;
+
+impl CommandHandler for CompassHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match require_player(&sender) {
+            Some(p) => p,
+            None => return Ok(1),
+        };
+        let pos = player.get_position();
+        sender.send_message(format_text(&format!(
+            "&aPosition: &f{:.1}, {:.1}, {:.1}",
+            pos.0, pos.1, pos.2
+        )));
+        Ok(1)
+    }
+}
+
+// ---------------- top ----------------
+
+pub struct TopHandler;
+
+impl CommandHandler for TopHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let _player = match require_player(&sender) {
+            Some(p) => p,
+            None => return Ok(1),
+        };
+        sender.send_message(format_text(
+            "&eTop is not yet implemented (requires block API)",
+        ));
+        Ok(1)
+    }
+}
+
+// ---------------- seen ----------------
+
+pub struct SeenHandler {
+    utility: Arc<Utility>,
+}
+
+impl CommandHandler for SeenHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let name = arg_string(&args, "target").unwrap_or_default();
+        if server.get_player_by_name(&name).is_some() {
+            sender.send_message(format_text(&format!(
+                "&a{} is online",
+                name
+            )));
+        } else if let Some(data) = self.utility.last_seen(&name) {
+            sender.send_message(format_text(&format!(
+                "&e{} &7was last seen {}",
+                data.name,
+                crate::utils::time::format_duration(
+                    crate::utils::time::now_timestamp() - data.last_seen
+                )
+            )));
+        } else {
+            sender.send_message(format_text(&format!(
+                "&cPlayer not found: {name}"
+            )));
+        }
+        Ok(1)
+    }
+}
+
+// ---------------- weather ----------------
+
+pub struct WeatherHandler;
+
+impl CommandHandler for WeatherHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match require_player(&sender) {
+            Some(p) => p,
+            None => return Ok(1),
+        };
+        let world = player.get_world();
+        let mode = arg_string(&args, "mode").unwrap_or_else(|| "clear".to_string());
+        match mode.to_lowercase().as_str() {
+            "clear" | "sun" => {
+                world.set_raining(false);
+                world.set_thundering(false);
+                sender.send_message(format_text("&aSet weather to clear"));
             }
-            Ok(())
-        }))
-        .build();
-    context.register_command(rules_cmd);
-
-    let module_clone = module.clone();
-    let motd_cmd = Command::new("motd")
-        .permission("essentials.motd")
-        .description("Show message of the day")
-        .handler(async_handler!(move |sender, _server, _args| {
-            sender.send_message(&format_text("&6&l--- MOTD ---"));
-            sender.send_message(&format_text("&e{}", module_clone.config.motd));
-            Ok(())
-        }))
-        .build();
-    context.register_command(motd_cmd);
-
-    let module_clone = module.clone();
-    let list_cmd = Command::new("list")
-        .alias("who")
-        .permission("essentials.list")
-        .description("List online players")
-        .handler(async_handler!(move |sender, server, _args| {
-            let players = server.get_online_players();
-            sender.send_message(&format_text("&6Online players ({}/{}):", players.len(), module_clone.config.max_players));
-            for player in players {
-                let prefix = if player.is_op() { "&c[OP]&r " } else { "" };
-                sender.send_message(&format_text("&7- {}{}", prefix, player.get_name()));
+            "rain" => {
+                world.set_raining(true);
+                world.set_thundering(false);
+                sender.send_message(format_text("&aSet weather to rain"));
             }
-            Ok(())
-        }))
-        .build();
-    context.register_command(list_cmd);
-
-    let module_clone = module.clone();
-    let whois_cmd = Command::new("whois")
-        .permission("essentials.whois")
-        .description("Get player info")
-        .argument("player")
-        .handler(async_handler!(move |sender, server, args| {
-            let target_name = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /whois <player>"))?;
-            let target = server.get_player(target_name).ok_or_else(|| anyhow::anyhow!("Player not found: {}", target_name))?;
-            
-            sender.send_message(&format_text("&6&l--- Player Info ---"));
-            sender.send_message(&format_text("&eName: &r{}", target.get_name()));
-            sender.send_message(&format_text("&eUUID: &r{}", target.get_uuid()));
-            sender.send_message(&format_text("&eGamemode: &r{:?}", target.get_gamemode()));
-            sender.send_message(&format_text("&eHealth: &r{}/{}", target.get_health(), target.get_max_health()));
-            sender.send_message(&format_text("&eFood: &r{}", target.get_food_level()));
-            sender.send_message(&format_text("&eOP: &r{}", target.is_op()));
-            sender.send_message(&format_text("&eAFK: &r{}", target.is_afk()));
-            Ok(())
-        }))
-        .build();
-    context.register_command(whois_cmd);
-
-    let module_clone = module.clone();
-    let speed_cmd = Command::new("speed")
-        .permission("essentials.speed")
-        .description("Set player speed")
-        .argument("player")
-        .argument("speed")
-        .handler(async_handler!(move |sender, server, args| {
-            let target = if args.len() == 1 {
-                sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?
-            } else {
-                server.get_player(args[0]).ok_or_else(|| anyhow::anyhow!("Player not found: {}", args[0]))?
-            };
-            
-            let speed_str = if args.len() == 1 { args[0] } else { args[1] };
-            let speed: f32 = speed_str.parse()?;
-            
-            if speed < 0.0 || speed > 10.0 {
-                sender.send_message(&format_text("&cSpeed must be between 0 and 10"));
-                return Ok(());
+            "thunder" | "storm" => {
+                world.set_raining(true);
+                world.set_thundering(true);
+                sender.send_message(format_text("&aSet weather to thunder"));
             }
-            
-            target.set_walk_speed(speed).await?;
-            target.set_fly_speed(speed).await?;
-            
-            sender.send_message(&format_text("&aSet {}'s speed to {}", target.get_name(), speed));
-            if target != sender.as_player().unwrap() {
-                target.send_message(&format_text("&aYour speed was set to {} by {}", speed, sender.get_name()));
-            }
-            Ok(())
-        }))
-        .build();
-    context.register_command(speed_cmd);
+            _ => sender.send_message(format_text("&cUsage: /weather <clear|rain|thunder>")),
+        }
+        Ok(1)
+    }
+}
 
-    let module_clone = module.clone();
-    let compass_cmd = Command::new("compass")
-        .permission("essentials.compass")
-        .description("Get a compass pointing to spawn")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            player.get_inventory().add_item("minecraft:compass".to_string(), 1).await?;
-            sender.send_message(&format_text("&aGiven a compass"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(compass_cmd);
+// ---------------- time ----------------
 
-    let module_clone = module.clone();
-    let top_cmd = Command::new("top")
-        .permission("essentials.top")
-        .description("Teleport to top block")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            let location = player.get_location();
-            let world = player.get_world();
-            let highest_y = world.get_highest_block_y(location.x as i32, location.z as i32).await?;
-            player.teleport(location.world, location.x, highest_y as f64 + 1.0, location.z, location.yaw, location.pitch).await?;
-            sender.send_message(&format_text("&aTeleported to top block"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(top_cmd);
+pub struct TimeHandler;
 
-    let module_clone = module.clone();
-    let back_cmd = Command::new("back")
-        .permission("essentials.back")
-        .description("Teleport to previous location")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            sender.send_message(&format_text("&cBack command not fully implemented"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(back_cmd);
-
-    let module_clone = module.clone();
-    let seen_cmd = Command::new("seen")
-        .permission("essentials.seen")
-        .description("See when a player was last online")
-        .argument("player")
-        .handler(async_handler!(move |sender, server, args| {
-            let target_name = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /seen <player>"))?;
-            
-            if let Some(player) = server.get_player(target_name) {
-                sender.send_message(&format_text("&a{} is currently online", target_name));
-            } else {
-                sender.send_message(&format_text("&cPlayer {} not found or never played", target_name));
-            }
-            Ok(())
-        }))
-        .build();
-    context.register_command(seen_cmd);
-
-    let module_clone = module.clone();
-    let repair_cmd = Command::new("repair")
-        .permission("essentials.repair")
-        .description("Repair held item")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            let mut item = player.get_inventory().get_item_in_main_hand();
-            if item.is_air() {
-                sender.send_message(&format_text("&cYou are not holding an item"));
-                return Ok(());
-            }
-            item.set_damage(0);
-            player.get_inventory().set_item_in_main_hand(item).await?;
-            sender.send_message(&format_text("&aItem repaired"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(repair_cmd);
-
-    let module_clone = module.clone();
-    let disposal_cmd = Command::new("disposal")
-        .permission("essentials.disposal")
-        .description("Open a disposal inventory")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            sender.send_message(&format_text("&cDisposal command not fully implemented"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(disposal_cmd);
-
-    let module_clone = module.clone();
-    let workbench_cmd = Command::new("workbench")
-        .alias("wb")
-        .permission("essentials.workbench")
-        .description("Open a crafting table")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            sender.send_message(&format_text("&cWorkbench command not fully implemented"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(workbench_cmd);
-
-    let module_clone = module.clone();
-    let anvil_cmd = Command::new("anvil")
-        .permission("essentials.anvil")
-        .description("Open an anvil")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            sender.send_message(&format_text("&cAnvil command not fully implemented"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(anvil_cmd);
-
-    let module_clone = module.clone();
-    let enderchest_cmd = Command::new("enderchest")
-        .alias("echest")
-        .permission("essentials.enderchest")
-        .description("Open ender chest")
-        .argument("player")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            sender.send_message(&format_text("&cEnderchest command not fully implemented"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(enderchest_cmd);
-
-    let module_clone = module.clone();
-    let weather_cmd = Command::new("weather")
-        .permission("essentials.weather")
-        .description("Change weather")
-        .argument("type")
-        .argument("duration")
-        .handler(async_handler!(move |sender, server, args| {
-            let weather_type = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /weather <clear|rain|thunder> [duration]"))?;
-            let duration = args.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(6000);
-            
-            for world in server.get_worlds() {
-                match weather_type.to_lowercase().as_str() {
-                    "clear" => world.set_weather(pumpkin_plugin_api::world::Weather::Clear, duration).await?,
-                    "rain" => world.set_weather(pumpkin_plugin_api::world::Weather::Rain, duration).await?,
-                    "thunder" => world.set_weather(pumpkin_plugin_api::world::Weather::Thunder, duration).await?,
-                    _ => {
-                        sender.send_message(&format_text("&cInvalid weather type: {}", weather_type));
-                        return Ok(());
-                    }
+impl CommandHandler for TimeHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let player = match require_player(&sender) {
+            Some(p) => p,
+            None => return Ok(1),
+        };
+        let world = player.get_world();
+        let mode = arg_string(&args, "mode").unwrap_or_else(|| "day".to_string());
+        let ticks: u64 = match mode.to_lowercase().as_str() {
+            "day" => 1000,
+            "noon" => 6000,
+            "night" => 13000,
+            "midnight" => 18000,
+            other => match other.parse() {
+                Ok(t) => t,
+                Err(_) => {
+                    sender.send_message(format_text(
+                        "&cUsage: /time <day|night|noon|midnight|<ticks>>",
+                    ));
+                    return Ok(1);
                 }
-            }
-            
-            sender.send_message(&format_text("&aSet weather to {} for {} ticks", weather_type, duration));
-            Ok(())
-        }))
-        .build();
-    context.register_command(weather_cmd);
+            },
+        };
+        world.set_time_of_day(ticks);
+        sender.send_message(format_text(&format!(
+            "&aSet time to &f{mode}"
+        )));
+        Ok(1)
+    }
+}
 
-    let module_clone = module.clone();
-    let time_cmd = Command::new("time")
-        .permission("essentials.time")
-        .description("Change time")
-        .argument("value")
-        .handler(async_handler!(move |sender, server, args| {
-            let time_str = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /time <value|day|night|set <value>>"))?;
-            
-            for world in server.get_worlds() {
-                match time_str.to_lowercase().as_str() {
-                    "day" => world.set_time(1000).await?,
-                    "night" => world.set_time(13000).await?,
-                    "noon" => world.set_time(6000).await?,
-                    "midnight" => world.set_time(18000).await?,
-                    _ => {
-                        if let Ok(time) = time_str.parse::<i64>() {
-                            world.set_time(time).await?;
-                        } else {
-                            sender.send_message(&format_text("&cInvalid time value: {}", time_str));
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-            
-            sender.send_message(&format_text("&aSet time to {}", time_str));
-            Ok(())
-        }))
-        .build();
-    context.register_command(time_cmd);
+// ---------------- butcher / extinguish (stubs pending entity API) ----------------
 
-    let module_clone = module.clone();
-    let butcher_cmd = Command::new("butcher")
-        .permission("essentials.butcher")
-        .description("Kill nearby mobs")
-        .argument("radius")
-        .handler(async_handler!(move |sender, _server, args| {
-            let radius = args.get(0).and_then(|s| s.parse::<f64>().ok()).unwrap_or(32.0);
-            sender.send_message(&format_text("&cButcher command not fully implemented (radius: {})", radius));
-            Ok(())
-        }))
-        .build();
-    context.register_command(butcher_cmd);
+pub struct ButcherHandler;
 
-    let module_clone = module.clone();
-    let extinguish_cmd = Command::new("extinguish")
-        .permission("essentials.extinguish")
-        .description("Extinguish fires in radius")
-        .argument("radius")
-        .handler(async_handler!(move |sender, _server, args| {
-            let radius = args.get(0).and_then(|s| s.parse::<f64>().ok()).unwrap_or(16.0);
-            sender.send_message(&format_text("&cExtinguish command not fully implemented (radius: {})", radius));
-            Ok(())
-        }))
-        .build();
-    context.register_command(extinguish_cmd);
+impl CommandHandler for ButcherHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text(
+            "&eButcher is not yet implemented (requires entity API)",
+        ));
+        Ok(1)
+    }
+}
+
+pub struct ExtinguishHandler;
+
+impl CommandHandler for ExtinguishHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text(
+            "&eExtinguish is not yet implemented (requires block API)",
+        ));
+        Ok(1)
+    }
+}
+
+// ---------------- registration ----------------
+
+pub fn register(utility: Arc<Utility>, context: &Context) {
+    let afk = Command::new(&["afk".to_string()], "Toggle AFK")
+        .execute(AfkHandler {
+            utility: utility.clone(),
+        });
+    context.register_command(afk, "essentials.afk");
+
+    let rules = Command::new(&["rules".to_string()], "View server rules")
+        .execute(RulesHandler {
+            utility: utility.clone(),
+        });
+    context.register_command(rules, "essentials.rules");
+
+    let motd = Command::new(&["motd".to_string()], "View message of the day")
+        .execute(MotdHandler {
+            utility: utility.clone(),
+        });
+    context.register_command(motd, "essentials.motd");
+
+    let list = Command::new(&["list".to_string()], "List online players")
+        .execute(ListHandler);
+    context.register_command(list, "essentials.list");
+
+    let whois = Command::new(&["whois".to_string()], "View player info")
+        .then(string_arg("target").execute(WhoisHandler));
+    context.register_command(whois, "essentials.whois");
+
+    let speed = Command::new(&["speed".to_string()], "Set walk speed")
+        .then(string_arg("speed").execute(SpeedHandler));
+    context.register_command(speed, "essentials.speed");
+
+    let compass = Command::new(&["compass".to_string()], "Show position")
+        .execute(CompassHandler);
+    context.register_command(compass, "essentials.compass");
+
+    let top = Command::new(&["top".to_string()], "Teleport to top")
+        .execute(TopHandler);
+    context.register_command(top, "essentials.top");
+
+    let seen = Command::new(&["seen".to_string()], "Check last seen")
+        .then(string_arg("target").execute(SeenHandler {
+            utility: utility.clone(),
+        }));
+    context.register_command(seen, "essentials.seen");
+
+    let weather = Command::new(&["weather".to_string()], "Change weather")
+        .then(string_arg("mode").execute(WeatherHandler));
+    context.register_command(weather, "essentials.weather");
+
+    let time = Command::new(&["time".to_string()], "Change time")
+        .then(string_arg("mode").execute(TimeHandler));
+    context.register_command(time, "essentials.time");
+
+    let butcher = Command::new(&["butcher".to_string()], "Kill mobs")
+        .execute(ButcherHandler);
+    context.register_command(butcher, "essentials.butcher");
+
+    let extinguish = Command::new(&["extinguish".to_string()], "Extinguish fires")
+        .execute(ExtinguishHandler);
+    context.register_command(extinguish, "essentials.extinguish");
 }

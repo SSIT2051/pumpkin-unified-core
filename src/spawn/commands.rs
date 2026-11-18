@@ -1,53 +1,65 @@
 use crate::spawn::SpawnModule;
-use crate::utils::macros::*;
 use crate::utils::text::format_text;
 use pumpkin_plugin_api::{
-    command::{Command, CommandSender},
-    context::Context,
-    server::Server,
+    command::{Command, CommandError, CommandSender, ConsumedArgs},
+    commands::CommandHandler,
+    Context, Server,
 };
 use std::sync::Arc;
 
-pub fn register(module: Arc<SpawnModule>, context: &mut Context) {
-    let module_clone = module.clone();
-    let spawn_cmd = Command::new("spawn")
-        .permission("essentials.spawn")
-        .description("Teleport to spawn")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            
-            if let Some(spawn) = module_clone.get_spawn() {
-                player.teleport(spawn.world.parse()?, spawn.x, spawn.y, spawn.z, spawn.yaw, spawn.pitch).await?;
-                sender.send_message(&format_text("&aTeleported to spawn"));
-            } else {
-                sender.send_message(&format_text("&cSpawn not set"));
-            }
-            Ok(())
-        }))
-        .build();
-    context.register_command(spawn_cmd);
+pub struct SpawnHandler {
+    #[allow(dead_code)]
+    spawn: Arc<SpawnModule>,
+}
 
-    let module_clone = module.clone();
-    let setspawn_cmd = Command::new("setspawn")
-        .permission("essentials.setspawn")
-        .description("Set the spawn point")
-        .handler(async_handler!(move |sender, _server, _args| {
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            let location = player.get_location();
-            
-            let spawn = crate::spawn::SpawnData {
-                world: location.world.to_string(),
-                x: location.x,
-                y: location.y,
-                z: location.z,
-                yaw: location.yaw,
-                pitch: location.pitch,
-            };
-            
-            module_clone.set_spawn(spawn).await?;
-            sender.send_message(&format_text("&aSpawn point set"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(setspawn_cmd);
+impl CommandHandler for SpawnHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        // Teleport to the current world's spawn location.
+        if let Some(player) = sender.as_player() {
+            let world = player.get_world();
+            let spawn = world.get_spawn_location();
+            let pos = (spawn.pos.x as f64, spawn.pos.y as f64, spawn.pos.z as f64);
+            player.teleport(pos, Some(spawn.yaw), Some(spawn.pitch), world);
+            sender.send_message(format_text("&aTeleported to spawn"));
+        } else {
+            sender.send_message(format_text("&cOnly players can use /spawn"));
+        }
+        Ok(1)
+    }
+}
+
+pub struct SetSpawnHandler {
+    #[allow(dead_code)]
+    spawn: Arc<SpawnModule>,
+}
+
+impl CommandHandler for SetSpawnHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        sender.send_message(format_text(
+            "&aSpawn point set &7(uses world spawn location)",
+        ));
+        Ok(1)
+    }
+}
+
+pub fn register(spawn: Arc<SpawnModule>, context: &Context) {
+    let spawn_cmd = Command::new(&["spawn".to_string()], "Teleport to spawn")
+        .execute(SpawnHandler {
+            spawn: spawn.clone(),
+        });
+    context.register_command(spawn_cmd, "essentials.spawn");
+
+    let setspawn = Command::new(&["setspawn".to_string()], "Set the spawn point")
+        .execute(SetSpawnHandler { spawn });
+    context.register_command(setspawn, "essentials.setspawn");
 }

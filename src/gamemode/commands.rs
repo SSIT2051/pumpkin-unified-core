@@ -1,92 +1,148 @@
-use crate::gamemode::GamemodeModule;
-use crate::utils::macros::*;
+//! Gamemode module: change player gamemodes.
+
 use crate::utils::text::format_text;
 use pumpkin_plugin_api::{
-    command::{Command, CommandSender},
-    context::Context,
-    server::Server,
+    command::{
+        Arg, ArgumentType, Command, CommandError, CommandNode, CommandSender, ConsumedArgs,
+        StringType,
+    },
+    commands::CommandHandler,
+    common::GameMode,
+    Context, Server,
 };
-use std::sync::Arc;
 
-pub fn register(module: Arc<GamemodeModule>, context: &mut Context) {
-    let module_clone = module.clone();
-    let gamemode_cmd = Command::new("gamemode")
-        .alias("gm")
-        .permission("essentials.gamemode")
-        .description("Change gamemode")
-        .argument("mode")
-        .argument("player")
-        .handler(async_handler!(move |sender, server, args| {
-            let mode_str = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /gamemode <mode> [player]"))?;
-            let target = if args.len() > 1 {
-                server.get_player(args[1]).ok_or_else(|| anyhow::anyhow!("Player not found: {}", args[1]))?
-            } else {
-                sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?
-            };
-            
-            let gamemode = match mode_str.to_lowercase().as_str() {
-                "0" | "survival" | "s" => pumpkin_plugin_api::world::Gamemode::Survival,
-                "1" | "creative" | "c" => pumpkin_plugin_api::world::Gamemode::Creative,
-                "2" | "adventure" | "a" => pumpkin_plugin_api::world::Gamemode::Adventure,
-                "3" | "spectator" | "sp" => pumpkin_plugin_api::world::Gamemode::Spectator,
-                _ => {
-                    sender.send_message(&format_text("&cInvalid gamemode: {}", mode_str));
-                    return Ok(());
-                }
-            };
-            
-            target.set_gamemode(gamemode).await?;
-            
-            let mode_name = match gamemode {
-                pumpkin_plugin_api::world::Gamemode::Survival => "Survival",
-                pumpkin_plugin_api::world::Gamemode::Creative => "Creative",
-                pumpkin_plugin_api::world::Gamemode::Adventure => "Adventure",
-                pumpkin_plugin_api::world::Gamemode::Spectator => "Spectator",
-            };
-            
-            sender.send_message(&format_text("&aSet {}'s gamemode to {}", target.get_name(), mode_name));
-            if target != sender.as_player().unwrap() {
-                target.send_message(&format_text("&aYour gamemode was set to {} by {}", mode_name, sender.get_name()));
-            }
-            Ok(())
-        }))
-        .build();
-    context.register_command(gamemode_cmd);
-
-    for (alias, mode, perm) in [
-        ("gmc", "creative", "essentials.gamemode.creative"),
-        ("gms", "survival", "essentials.gamemode.survival"),
-        ("gma", "adventure", "essentials.gamemode.adventure"),
-        ("gmsp", "spectator", "essentials.gamemode.spectator"),
-    ] {
-        let module_clone = module.clone();
-        let cmd = Command::new(alias)
-            .permission(perm)
-            .description(&format!("Set gamemode to {}", mode))
-            .argument("player")
-            .handler(async_handler!(move |sender, server, args| {
-                let target = if args.is_empty() {
-                    sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?
-                } else {
-                    server.get_player(args[0]).ok_or_else(|| anyhow::anyhow!("Player not found: {}", args[0]))?
-                };
-                
-                let gamemode = match mode {
-                    "creative" => pumpkin_plugin_api::world::Gamemode::Creative,
-                    "survival" => pumpkin_plugin_api::world::Gamemode::Survival,
-                    "adventure" => pumpkin_plugin_api::world::Gamemode::Adventure,
-                    "spectator" => pumpkin_plugin_api::world::Gamemode::Spectator,
-                    _ => return Ok(()),
-                };
-                
-                target.set_gamemode(gamemode).await?;
-                sender.send_message(&format_text("&aSet {}'s gamemode to {}", target.get_name(), mode));
-                if target != sender.as_player().unwrap() {
-                    target.send_message(&format_text("&aYour gamemode was set to {} by {}", mode, sender.get_name()));
-                }
-                Ok(())
-            }))
-            .build();
-        context.register_command(cmd);
+fn arg_string(args: &ConsumedArgs, key: &str) -> Option<String> {
+    match args.get_value(key) {
+        Arg::Simple(s) | Arg::Msg(s) => Some(s),
+        _ => None,
     }
+}
+
+fn string_arg(name: &str) -> CommandNode {
+    CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord))
+}
+
+fn mode_name(mode: GameMode) -> &'static str {
+    match mode {
+        GameMode::Survival => "survival",
+        GameMode::Creative => "creative",
+        GameMode::Adventure => "adventure",
+        GameMode::Spectator => "spectator",
+    }
+}
+
+/// Sets the gamemode of the sender (or `[target]`) to a fixed `mode`.
+pub struct GamemodeHandler {
+    mode: GameMode,
+}
+
+impl CommandHandler for GamemodeHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target");
+        let target = if let Some(name) = target_name {
+            match server.get_player_by_name(&name) {
+                Some(p) => p,
+                None => {
+                    sender.send_message(format_text(&format!(
+                        "&cPlayer not found: {name}"
+                    )));
+                    return Ok(1);
+                }
+            }
+        } else {
+            match sender.as_player() {
+                Some(p) => p,
+                None => {
+                    sender.send_message(format_text("&cSpecify a player from console"));
+                    return Ok(1);
+                }
+            }
+        };
+
+        target.set_gamemode(self.mode);
+        sender.send_message(format_text(&format!(
+            "&aSet {}'s gamemode to &f{}",
+            target.get_name(),
+            mode_name(self.mode)
+        )));
+        Ok(1)
+    }
+}
+
+/// Reports the sender's (or `[target]`'s) current gamemode.
+pub struct GamemodeQueryHandler;
+
+impl CommandHandler for GamemodeQueryHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target = if let Some(name) = arg_string(&args, "target") {
+            match server.get_player_by_name(&name) {
+                Some(p) => p,
+                None => {
+                    sender.send_message(format_text(&format!(
+                        "&cPlayer not found: {name}"
+                    )));
+                    return Ok(1);
+                }
+            }
+        } else {
+            match sender.as_player() {
+                Some(p) => p,
+                None => {
+                    sender.send_message(format_text("&cSpecify a player from console"));
+                    return Ok(1);
+                }
+            }
+        };
+        sender.send_message(format_text(&format!(
+            "&a{} 's gamemode is &f{}",
+            target.get_name(),
+            mode_name(target.get_gamemode())
+        )));
+        Ok(1)
+    }
+}
+
+pub fn register(context: &Context) {
+    let gamemode = Command::new(
+        &["gamemode".to_string(), "gm".to_string()],
+        "Change gamemode",
+    )
+    .then(
+        CommandNode::literal("survival")
+            .then(string_arg("target").execute(GamemodeHandler { mode: GameMode::Survival })),
+    )
+    .then(
+        CommandNode::literal("creative")
+            .then(string_arg("target").execute(GamemodeHandler { mode: GameMode::Creative })),
+    )
+    .then(
+        CommandNode::literal("adventure")
+            .then(string_arg("target").execute(GamemodeHandler { mode: GameMode::Adventure })),
+    )
+    .then(
+        CommandNode::literal("spectator")
+            .then(string_arg("target").execute(GamemodeHandler { mode: GameMode::Spectator })),
+    )
+    .then(string_arg("mode").execute(GamemodeQueryHandler));
+    context.register_command(gamemode, "essentials.gamemode");
+
+    let alias = |name: &str, mode: GameMode| {
+        let cmd = Command::new(&[name.to_string()], "Change gamemode")
+            .then(string_arg("target").execute(GamemodeHandler { mode }));
+        context.register_command(cmd, "essentials.gamemode");
+    };
+    alias("gmc", GameMode::Creative);
+    alias("gms", GameMode::Survival);
+    alias("gma", GameMode::Adventure);
+    alias("gmsp", GameMode::Spectator);
 }

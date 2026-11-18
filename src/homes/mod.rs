@@ -1,13 +1,13 @@
-use crate::storage::StorageBackend;
-use crate::utils::macros::*;
-use anyhow::Result;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use uuid::Uuid;
+//! Homes module: per-player personal teleport locations.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::storage::Storage;
+use std::sync::Arc;
+
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Home {
+    pub owner: String,
     pub name: String,
     pub world: String,
     pub x: f64,
@@ -15,80 +15,56 @@ pub struct Home {
     pub z: f64,
     pub yaw: f32,
     pub pitch: f32,
-    pub created_at: i64,
 }
 
-pub struct HomesModule {
-    storage: Arc<StorageBackend>,
-    cache: Arc<DashMap<String, Home>>,
-    config: Arc<crate::config::HomesConfig>,
+pub struct Homes {
+    storage: Arc<Storage>,
+    max_homes: usize,
 }
 
-impl HomesModule {
-    pub fn new(storage: Arc<StorageBackend>) -> Self {
-        let config = Arc::new(crate::config::Config::default().homes);
+impl Homes {
+    pub fn new(storage: Arc<Storage>) -> Self {
         Self {
             storage,
-            cache: Arc::new(DashMap::new()),
-            config,
+            max_homes: 3,
         }
     }
 
-    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::HomesConfig>) -> Self {
-        Self {
-            storage,
-            cache: Arc::new(DashMap::new()),
-            config,
+    fn key(owner: &str, name: &str) -> String {
+        format!("{owner}:{name}")
+    }
+
+    pub fn get(&self, owner: &str, name: &str) -> Option<Home> {
+        self.storage.get("homes", &Self::key(owner, name))
+    }
+
+    pub fn set(&self, home: &Home) {
+        self.storage.set("homes", &Self::key(&home.owner, &home.name), home);
+    }
+
+    pub fn delete(&self, owner: &str, name: &str) -> bool {
+        let key = Self::key(owner, name);
+        if self.storage.get::<Home>("homes", &key).is_some() {
+            self.storage.delete("homes", &key);
+            true
+        } else {
+            false
         }
     }
 
-    fn cache_key(&self, uuid: Uuid, name: &str) -> String {
-        format!("{}:{}", uuid, name.to_lowercase())
+    pub fn list(&self, owner: &str) -> Vec<Home> {
+        self.storage
+            .values::<Home>("homes")
+            .into_iter()
+            .filter(|h| h.owner == owner)
+            .collect()
     }
 
-    pub async fn get_home(&self, uuid: Uuid, name: &str) -> Result<Option<Home>> {
-        let key = self.cache_key(uuid, name);
-        if let Some(cached) = self.cache.get(&key) {
-            return Ok(Some(cached.clone()));
-        }
-        
-        if let Some(data) = self.storage.get("homes", &key).await? {
-            let home_data: crate::storage::SerializedData<Home> = crate::storage::SerializedData::deserialize(&data)?;
-            self.cache.insert(key.clone(), home_data.data.clone());
-            return Ok(Some(home_data.data));
-        }
-        Ok(None)
+    pub fn count(&self, owner: &str) -> usize {
+        self.list(owner).len()
     }
 
-    pub async fn set_home(&self, uuid: Uuid, home: Home) -> Result<()> {
-        let key = self.cache_key(uuid, &home.name);
-        let data = crate::storage::SerializedData::new(home.clone()).serialize()?;
-        self.storage.set("homes", &key, &data).await?;
-        self.cache.insert(key, home);
-        Ok(())
-    }
-
-    pub async fn delete_home(&self, uuid: Uuid, name: &str) -> Result<()> {
-        let key = self.cache_key(uuid, name);
-        self.storage.delete("homes", &key).await?;
-        self.cache.remove(&key);
-        Ok(())
-    }
-
-    pub async fn list_homes(&self, uuid: Uuid) -> Result<Vec<Home>> {
-        let pattern = format!("{}:*", uuid);
-        let keys = self.storage.keys("homes", &pattern).await?;
-        let mut homes = Vec::new();
-        for key in keys {
-            if let Some(data) = self.storage.get("homes", &key).await? {
-                let home_data: crate::storage::SerializedData<Home> = crate::storage::SerializedData::deserialize(&data)?;
-                homes.push(home_data.data);
-            }
-        }
-        Ok(homes)
-    }
-
-    pub fn register_commands(&self, context: &mut pumpkin_plugin_api::context::Context) {
-        crate::homes::commands::register(self.clone(), context);
+    pub fn max_homes(&self) -> usize {
+        self.max_homes
     }
 }

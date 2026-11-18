@@ -1,199 +1,104 @@
-use crate::storage::StorageBackend;
-use crate::utils::macros::*;
-use anyhow::Result;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
+//! Moderation module: bans, mutes, kicks, fly, god, heal, feed, vanish.
+
+use crate::storage::Storage;
+use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
+use std::sync::Mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BanEntry {
-    pub uuid: Uuid,
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Punishment {
+    pub uuid: String,
     pub name: String,
+    pub kind: String,
     pub reason: String,
-    pub banned_by: Uuid,
-    pub banned_at: i64,
+    pub created_at: i64,
     pub expires_at: Option<i64>,
-    pub active: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MuteEntry {
-    pub uuid: Uuid,
-    pub name: String,
-    pub reason: String,
-    pub muted_by: Uuid,
-    pub muted_at: i64,
-    pub expires_at: Option<i64>,
-    pub active: bool,
+pub struct Moderation {
+    storage: Arc<Storage>,
+    state: Mutex<HashMap<String, ModerationState>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JailEntry {
-    pub uuid: Uuid,
-    pub name: String,
-    pub reason: String,
-    pub jailed_by: Uuid,
-    pub jailed_at: i64,
-    pub expires_at: Option<i64>,
-    pub active: bool,
+#[derive(Debug, Clone, Default)]
+pub struct ModerationState {
+    pub flying: bool,
+    pub god: bool,
+    pub vanished: bool,
 }
 
-pub struct ModerationModule {
-    storage: Arc<StorageBackend>,
-    bans: Arc<DashMap<Uuid, BanEntry>>,
-    mutes: Arc<DashMap<Uuid, MuteEntry>>,
-    jails: Arc<DashMap<Uuid, JailEntry>>,
-    config: Arc<crate::config::ModerationConfig>,
-}
-
-impl ModerationModule {
-    pub fn new(storage: Arc<StorageBackend>) -> Self {
-        let config = Arc::new(crate::config::Config::default().moderation);
+impl Moderation {
+    pub fn new(storage: Arc<Storage>) -> Self {
         Self {
             storage,
-            bans: Arc::new(DashMap::new()),
-            mutes: Arc::new(DashMap::new()),
-            jails: Arc::new(DashMap::new()),
-            config,
+            state: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::ModerationConfig>) -> Self {
-        Self {
-            storage,
-            bans: Arc::new(DashMap::new()),
-            mutes: Arc::new(DashMap::new()),
-            jails: Arc::new(DashMap::new()),
-            config,
-        }
+    fn key(uuid: &str) -> String {
+        uuid.to_string()
     }
 
-    pub async fn load_data(&self) -> Result<()> {
-        for key in self.storage.keys("bans", "%").await? {
-            if let Some(data) = self.storage.get("bans", &key).await? {
-                let entry: crate::storage::SerializedData<BanEntry> = crate::storage::SerializedData::deserialize(&data)?;
-                if entry.data.active {
-                    self.bans.insert(entry.data.uuid, entry.data);
+    pub fn set_punishment(&self, punishment: &Punishment) {
+        self.storage.set(
+            "punishments",
+            &Self::key(&punishment.uuid),
+            punishment,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub fn get_punishment(&self, uuid: &str) -> Option<Punishment> {
+        self.storage.get("punishments", &Self::key(uuid))
+    }
+
+    /// Finds a punishment by player name (scanning stored records).
+    pub fn get_punishment_by_name(&self, name: &str) -> Option<Punishment> {
+        for key in self.storage.keys("punishments") {
+            if let Some(p) = self.storage.get::<Punishment>("punishments", &key) {
+                if p.name.eq_ignore_ascii_case(name) {
+                    return Some(p);
                 }
             }
         }
-        for key in self.storage.keys("mutes", "%").await? {
-            if let Some(data) = self.storage.get("mutes", &key).await? {
-                let entry: crate::storage::SerializedData<MuteEntry> = crate::storage::SerializedData::deserialize(&data)?;
-                if entry.data.active {
-                    self.mutes.insert(entry.data.uuid, entry.data);
-                }
+        None
+    }
+
+    pub fn remove_punishment(&self, uuid: &str) {
+        self.storage.delete("punishments", &Self::key(uuid));
+    }
+
+    #[allow(dead_code)]
+    pub fn is_muted(&self, uuid: &str) -> bool {
+        match self.get_punishment(uuid) {
+            Some(p) => {
+                p.kind == "mute"
+                    && p.expires_at.map(|e| crate::utils::time::now_timestamp() < e).unwrap_or(true)
             }
+            None => false,
         }
-        for key in self.storage.keys("jails", "%").await? {
-            if let Some(data) = self.storage.get("jails", &key).await? {
-                let entry: crate::storage::SerializedData<JailEntry> = crate::storage::SerializedData::deserialize(&data)?;
-                if entry.data.active {
-                    self.jails.insert(entry.data.uuid, entry.data);
-                }
-            }
-        }
-        Ok(())
     }
 
-    pub fn is_banned(&self, uuid: Uuid) -> Option<BanEntry> {
-        self.bans.get(&uuid).filter(|b| {
-            b.active && b.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())
-        }).map(|b| b.clone())
+    pub fn state(&self, uuid: &str) -> ModerationState {
+        self.state
+            .lock()
+            .unwrap()
+            .get(uuid)
+            .cloned()
+            .unwrap_or_default()
     }
 
-    pub fn is_muted(&self, uuid: Uuid) -> Option<MuteEntry> {
-        self.mutes.get(&uuid).filter(|m| {
-            m.active && m.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())
-        }).map(|m| m.clone())
+    pub fn set_flying(&self, uuid: &str, flying: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().flying = flying;
     }
 
-    pub fn is_jailed(&self, uuid: Uuid) -> Option<JailEntry> {
-        self.jails.get(&uuid).filter(|j| {
-            j.active && j.expires_at.map_or(true, |e| e > chrono::Utc::now().timestamp())
-        }).map(|j| j.clone())
+    pub fn set_god(&self, uuid: &str, god: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().god = god;
     }
 
-    pub async fn ban(&self, target: Uuid, name: String, reason: String, by: Uuid, duration: Option<u64>) -> Result<()> {
-        let expires_at = duration.map(|d| chrono::Utc::now().timestamp() + d as i64);
-        let entry = BanEntry {
-            uuid: target,
-            name,
-            reason,
-            banned_by: by,
-            banned_at: chrono::Utc::now().timestamp(),
-            expires_at,
-            active: true,
-        };
-        let data = crate::storage::SerializedData::new(entry.clone()).serialize()?;
-        self.storage.set("bans", &target.to_string(), &data).await?;
-        self.bans.insert(target, entry);
-        Ok(())
-    }
-
-    pub async fn unban(&self, target: Uuid) -> Result<()> {
-        if let Some(mut entry) = self.bans.get_mut(&target) {
-            entry.active = false;
-            let data = crate::storage::SerializedData::new(entry.clone()).serialize()?;
-            self.storage.set("bans", &target.to_string(), &data).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn mute(&self, target: Uuid, name: String, reason: String, by: Uuid, duration: Option<u64>) -> Result<()> {
-        let expires_at = duration.map(|d| chrono::Utc::now().timestamp() + d as i64);
-        let entry = MuteEntry {
-            uuid: target,
-            name,
-            reason,
-            muted_by: by,
-            muted_at: chrono::Utc::now().timestamp(),
-            expires_at,
-            active: true,
-        };
-        let data = crate::storage::SerializedData::new(entry.clone()).serialize()?;
-        self.storage.set("mutes", &target.to_string(), &data).await?;
-        self.mutes.insert(target, entry);
-        Ok(())
-    }
-
-    pub async fn unmute(&self, target: Uuid) -> Result<()> {
-        if let Some(mut entry) = self.mutes.get_mut(&target) {
-            entry.active = false;
-            let data = crate::storage::SerializedData::new(entry.clone()).serialize()?;
-            self.storage.set("mutes", &target.to_string(), &data).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn jail(&self, target: Uuid, name: String, reason: String, by: Uuid, duration: Option<u64>) -> Result<()> {
-        let expires_at = duration.map(|d| chrono::Utc::now().timestamp() + d as i64);
-        let entry = JailEntry {
-            uuid: target,
-            name,
-            reason,
-            jailed_by: by,
-            jailed_at: chrono::Utc::now().timestamp(),
-            expires_at,
-            active: true,
-        };
-        let data = crate::storage::SerializedData::new(entry.clone()).serialize()?;
-        self.storage.set("jails", &target.to_string(), &data).await?;
-        self.jails.insert(target, entry);
-        Ok(())
-    }
-
-    pub async fn unjail(&self, target: Uuid) -> Result<()> {
-        if let Some(mut entry) = self.jails.get_mut(&target) {
-            entry.active = false;
-            let data = crate::storage::SerializedData::new(entry.clone()).serialize()?;
-            self.storage.set("jails", &target.to_string(), &data).await?;
-        }
-        Ok(())
-    }
-
-    pub fn register_commands(&self, context: &mut pumpkin_plugin_api::context::Context) {
-        crate::moderation::commands::register(self.clone(), context);
+    pub fn set_vanished(&self, uuid: &str, vanished: bool) {
+        self.state.lock().unwrap().entry(uuid.to_string()).or_default().vanished = vanished;
     }
 }

@@ -1,61 +1,70 @@
-use crate::utils::macros::*;
-use crate::utils::text::format_text;
-use pumpkin_plugin_api::{
-    command::{Command, CommandSender},
-    context::Context,
-    server::Server,
-};
+//! Chat module: private messaging, mail, and broadcasts.
+
+use crate::storage::Storage;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 
-pub struct ChatModule {
-    config: Arc<crate::config::ChatConfig>,
-    permissions: Option<Arc<crate::permissions::PermissionsModule>>,
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Mail {
+    pub sender: String,
+    pub recipient: String,
+    pub message: String,
+    pub timestamp: i64,
+    pub read: bool,
 }
 
-impl ChatModule {
-    pub fn new() -> Self {
-        let config = Arc::new(crate::config::Config::default().chat);
-        Self { 
-            config,
-            permissions: None,
-        }
-    }
-
-    pub fn with_permissions(mut self, permissions: Arc<crate::permissions::PermissionsModule>) -> Self {
-        self.permissions = Some(permissions);
-        self
-    }
-
-    pub fn format_chat(&self, player: &pumpkin_plugin_api::player::Player, message: &str) -> String {
-        let group = "default";
-        let prefix = "";
-        let suffix = "";
-        
-        if let Some(perms) = &self.permissions {
-            // Try to get prefix/suffix from LuckPerms
-            let _contexts = std::collections::HashMap::new();
-            // Note: This would need to query the permissions module for the player's prefix/suffix
-            // For now, using empty values as placeholder
-        }
-        
-        self.config.format
-            .replace("{player}", player.get_name())
-            .replace("{message}", message)
-            .replace("{group}", group)
-            .replace("{prefix}", prefix)
-            .replace("{suffix}", suffix)
-    }
-
-    pub fn register_commands(&self, context: &mut Context) {
-        crate::chat::commands::register(Arc::new(self.clone()), context);
-    }
+pub struct Chat {
+    storage: Arc<Storage>,
+    reply_targets: Mutex<HashMap<String, String>>,
 }
 
-impl Clone for ChatModule {
-    fn clone(&self) -> Self {
-        Self { 
-            config: self.config.clone(),
-            permissions: self.permissions.clone(),
+impl Chat {
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self {
+            storage,
+            reply_targets: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn set_reply(&self, from: &str, to: &str) {
+        self.reply_targets
+            .lock()
+            .unwrap()
+            .insert(from.to_string(), to.to_string());
+    }
+
+    pub fn get_reply(&self, from: &str) -> Option<String> {
+        self.reply_targets.lock().unwrap().get(from).cloned()
+    }
+
+    fn mail_key(recipient: &str) -> String {
+        format!("mail:{recipient}")
+    }
+
+    pub fn send_mail(&self, sender: &str, recipient: &str, message: &str) {
+        let mail = Mail {
+            sender: sender.to_string(),
+            recipient: recipient.to_string(),
+            message: message.to_string(),
+            timestamp: crate::utils::time::now_timestamp(),
+            read: false,
+        };
+        let key = Self::mail_key(recipient);
+        let mut mails: Vec<Mail> = self.storage.get("chat", &key).unwrap_or_default();
+        mails.push(mail);
+        self.storage.set("chat", &key, &mails);
+    }
+
+    pub fn read_mail(&self, recipient: &str) -> Vec<Mail> {
+        let key = Self::mail_key(recipient);
+        let mut mails: Vec<Mail> = self.storage.get("chat", &key).unwrap_or_default();
+        for m in &mut mails {
+            m.read = true;
+        }
+        self.storage.set("chat", &key, &mails);
+        mails
     }
 }

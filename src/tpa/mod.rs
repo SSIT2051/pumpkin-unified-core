@@ -1,96 +1,82 @@
-use crate::storage::StorageBackend;
-use crate::utils::macros::*;
-use anyhow::Result;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::time::Instant;
-use uuid::Uuid;
+//! TPA module: teleport request (tpa) system.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::storage::Storage;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TpaRequest {
-    pub from: Uuid,
-    pub to: Uuid,
-    pub request_type: TpaType,
+    pub requester: String,
+    pub requester_uuid: String,
+    pub target: String,
+    pub target_uuid: String,
+    pub here: bool,
     pub created_at: i64,
     pub expires_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TpaType {
-    Tpa,
-    Tpahere,
+pub struct Tpa {
+    #[allow(dead_code)]
+    storage: Arc<Storage>,
+    requests: Mutex<HashMap<String, TpaRequest>>,
+    timeout_seconds: i64,
+    enabled: Mutex<HashMap<String, bool>>,
 }
 
-pub struct TpaModule {
-    requests: Arc<DashMap<Uuid, TpaRequest>>,
-    toggles: Arc<DashMap<Uuid, bool>>,
-    config: Arc<crate::config::TpaConfig>,
-}
-
-impl TpaModule {
-    pub fn new() -> Self {
-        let config = Arc::new(crate::config::Config::default().tpa);
+impl Tpa {
+    pub fn new(storage: Arc<Storage>) -> Self {
         Self {
-            requests: Arc::new(DashMap::new()),
-            toggles: Arc::new(DashMap::new()),
-            config,
+            storage,
+            requests: Mutex::new(HashMap::new()),
+            timeout_seconds: 60,
+            enabled: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn with_config(config: Arc<crate::config::TpaConfig>) -> Self {
-        Self {
-            requests: Arc::new(DashMap::new()),
-            toggles: Arc::new(DashMap::new()),
-            config,
-        }
+    pub fn is_enabled(&self, uuid: &str) -> bool {
+        *self.enabled.lock().unwrap().get(uuid).unwrap_or(&true)
     }
 
-    pub fn create_request(&self, from: Uuid, to: Uuid, request_type: TpaType) -> Result<()> {
-        if !self.toggles.get(&to).copied().unwrap_or(true) {
-            return Err(anyhow::anyhow!("Player has TPA toggled off"));
-        }
-        
-        let now = chrono::Utc::now().timestamp();
+    pub fn toggle(&self, uuid: &str) -> bool {
+        let mut enabled = self.enabled.lock().unwrap();
+        let current = *enabled.get(uuid).unwrap_or(&true);
+        let new_value = !current;
+        enabled.insert(uuid.to_string(), new_value);
+        new_value
+    }
+
+    pub fn send_request(
+        &self,
+        requester: String,
+        requester_uuid: String,
+        target: String,
+        target_uuid: String,
+        here: bool,
+    ) {
+        let now = crate::utils::time::now_timestamp();
         let request = TpaRequest {
-            from,
-            to,
-            request_type,
+            requester,
+            requester_uuid,
+            target: target.clone(),
+            target_uuid: target_uuid.clone(),
+            here,
             created_at: now,
-            expires_at: now + self.config.request_timeout as i64,
+            expires_at: now + self.timeout_seconds,
         };
-        
-        self.requests.insert(to, request);
-        Ok(())
+        self.requests
+            .lock()
+            .unwrap()
+            .insert(target_uuid, request);
     }
 
-    pub fn get_request(&self, to: Uuid) -> Option<TpaRequest> {
-        self.requests.get(&to).map(|r| r.clone())
+    pub fn accept(&self, target_uuid: &str) -> Option<TpaRequest> {
+        self.requests.lock().unwrap().remove(target_uuid)
     }
 
-    pub fn remove_request(&self, to: Uuid) {
-        self.requests.remove(&to);
-    }
-
-    pub fn is_expired(&self, request: &TpaRequest) -> bool {
-        chrono::Utc::now().timestamp() > request.expires_at
-    }
-
-    pub fn set_toggle(&self, uuid: Uuid, enabled: bool) {
-        self.toggles.insert(uuid, enabled);
-    }
-
-    pub fn get_toggle(&self, uuid: Uuid) -> bool {
-        self.toggles.get(&uuid).copied().unwrap_or(false)
-    }
-
-    pub fn cleanup_expired(&self) {
-        let now = chrono::Utc::now().timestamp();
-        self.requests.retain(|_, v| v.expires_at > now);
-    }
-
-    pub fn register_commands(&self, context: &mut pumpkin_plugin_api::context::Context) {
-        crate::tpa::commands::register(self.clone(), context);
+    pub fn deny(&self, target_uuid: &str) -> Option<TpaRequest> {
+        self.requests.lock().unwrap().remove(target_uuid)
     }
 }

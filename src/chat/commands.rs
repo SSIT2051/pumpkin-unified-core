@@ -1,118 +1,237 @@
-use crate::chat::ChatModule;
-use crate::utils::macros::*;
+use crate::chat::Chat;
 use crate::utils::text::format_text;
 use pumpkin_plugin_api::{
-    command::{Command, CommandSender},
-    context::Context,
-    server::Server,
+    command::{
+        Arg, ArgumentType, Command, CommandError, CommandNode, CommandSender, ConsumedArgs,
+        StringType,
+    },
+    commands::CommandHandler,
+    Context, Server,
 };
 use std::sync::Arc;
 
-pub fn register(module: Arc<ChatModule>, context: &mut Context) {
-    let module_clone = module.clone();
-    let msg_cmd = Command::new("msg")
-        .alias("tell")
-        .alias("w")
-        .permission("essentials.msg")
-        .description("Send a private message")
-        .argument("player")
-        .argument("message")
-        .handler(async_handler!(move |sender, server, args| {
-            let target_name = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /msg <player> <message>"))?;
-            let message = args.get(1..).map(|s| s.join(" ")).unwrap_or_default();
-            
-            let target = server.get_player(target_name).ok_or_else(|| anyhow::anyhow!("Player not found: {}", target_name))?;
-            
-            let format = module_clone.config.private_message_format
-                .replace("{from}", sender.get_name())
-                .replace("{to}", target.get_name())
-                .replace("{message}", &message);
-            
-            sender.send_message(&format_text(&format));
-            target.send_message(&format_text(&format));
-            Ok(())
-        }))
-        .build();
-    context.register_command(msg_cmd);
+fn arg_string(args: &ConsumedArgs, key: &str) -> Option<String> {
+    match args.get_value(key) {
+        Arg::Simple(s) | Arg::Msg(s) => Some(s),
+        _ => None,
+    }
+}
 
-    let module_clone = module.clone();
-    let r_cmd = Command::new("r")
-        .alias("reply")
-        .permission("essentials.reply")
-        .description("Reply to last private message")
-        .argument("message")
-        .handler(async_handler!(move |sender, _server, args| {
-            let message = args.get(0..).map(|s| s.join(" ")).unwrap_or_default();
-            sender.send_message(&format_text("&cReply command not fully implemented (no last message tracking)"));
-            Ok(())
-        }))
-        .build();
-    context.register_command(r_cmd);
+fn string_arg(name: &str) -> CommandNode {
+    CommandNode::argument(name, &ArgumentType::String(StringType::SingleWord))
+}
 
-    let module_clone = module.clone();
-    let mail_cmd = Command::new("mail")
-        .permission("essentials.mail")
-        .description("Manage offline messages")
-        .subcommand(
-            Command::new("send")
-                .permission("essentials.mail.send")
-                .argument("player")
-                .argument("message")
-                .handler(async_handler!(move |sender, _server, args| {
-                    let target_name = args.get(0).ok_or_else(|| anyhow::anyhow!("Usage: /mail send <player> <message>"))?;
-                    let message = args.get(1..).map(|s| s.join(" ")).unwrap_or_default();
-                    sender.send_message(&format_text("&cMail send not fully implemented"));
-                    Ok(())
-                }))
-                .build()
-        )
-        .subcommand(
-            Command::new("read")
-                .permission("essentials.mail")
-                .handler(async_handler!(move |sender, _server, _args| {
-                    sender.send_message(&format_text("&cMail read not fully implemented"));
-                    Ok(())
-                }))
-                .build()
-        )
-        .build();
-    context.register_command(mail_cmd);
+fn greedy_arg(name: &str) -> CommandNode {
+    CommandNode::argument(name, &ArgumentType::String(StringType::Greedy))
+}
 
-    let module_clone = module.clone();
-    let broadcast_cmd = Command::new("broadcast")
-        .alias("bc")
-        .permission("essentials.broadcast")
-        .description("Broadcast a message to all players")
-        .argument("message")
-        .handler(async_handler!(move |sender, server, args| {
-            let message = args.get(0..).map(|s| s.join(" ")).unwrap_or_default();
-            let format = module_clone.config.broadcast_format.replace("{message}", &message);
-            
-            for player in server.get_online_players() {
-                player.send_message(&format_text(&format));
+// ---------------- msg ----------------
+
+pub struct MsgHandler {
+    chat: Arc<Chat>,
+}
+
+impl CommandHandler for MsgHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target").unwrap_or_default();
+        let message = arg_string(&args, "message").unwrap_or_default();
+        let sender_name = sender.get_name();
+
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text(&format!(
+                    "&cPlayer not found: {target_name}"
+                )));
+                return Ok(1);
             }
-            Ok(())
-        }))
-        .build();
-    context.register_command(broadcast_cmd);
+        };
 
-    let module_clone = module.clone();
-    let broadcastworld_cmd = Command::new("broadcastworld")
-        .alias("bcw")
-        .permission("essentials.broadcastworld")
-        .description("Broadcast a message to players in the same world")
-        .argument("message")
-        .handler(async_handler!(move |sender, server, args| {
-            let message = args.get(0..).map(|s| s.join(" ")).unwrap_or_default();
-            let player = sender.as_player().ok_or_else(|| anyhow::anyhow!("Only players can use this command"))?;
-            let world = player.get_world();
-            let format = module_clone.config.broadcast_format.replace("{message}", &message);
-            
-            for p in world.get_players() {
-                p.send_message(&format_text(&format));
+        self.chat.set_reply(&target_name, &sender_name);
+        self.chat.set_reply(&sender_name, &target_name);
+
+        sender.send_message(format_text(&format!(
+            "&7[me -> {}] &f{}",
+            target.get_name(),
+            message
+        )));
+        target.send_system_message(
+            format_text(&format!(
+                "&7[{}] &f{}",
+                sender_name, message
+            )),
+            false,
+        );
+        Ok(1)
+    }
+}
+
+// ---------------- r (reply) ----------------
+
+pub struct ReplyHandler {
+    chat: Arc<Chat>,
+}
+
+impl CommandHandler for ReplyHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let message = arg_string(&args, "message").unwrap_or_default();
+        let sender_name = sender.get_name();
+        let target_name = match self.chat.get_reply(&sender_name) {
+            Some(t) => t,
+            None => {
+                sender.send_message(format_text("&cNo one to reply to"));
+                return Ok(1);
             }
-            Ok(())
-        }))
-        .build();
-    context.register_command(broadcastworld_cmd);
+        };
+        let target = match server.get_player_by_name(&target_name) {
+            Some(p) => p,
+            None => {
+                sender.send_message(format_text("&cThat player is no longer online"));
+                return Ok(1);
+            }
+        };
+        sender.send_message(format_text(&format!(
+            "&7[me -> {}] &f{}",
+            target.get_name(),
+            message
+        )));
+        target.send_system_message(
+            format_text(&format!(
+                "&7[{}] &f{}",
+                sender_name, message
+            )),
+            false,
+        );
+        Ok(1)
+    }
+}
+
+// ---------------- mail ----------------
+
+pub struct MailSendHandler {
+    chat: Arc<Chat>,
+}
+
+impl CommandHandler for MailSendHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let target_name = arg_string(&args, "target").unwrap_or_default();
+        let message = arg_string(&args, "message").unwrap_or_default();
+        self.chat
+            .send_mail(&sender.get_name(), &target_name, &message);
+        sender.send_message(format_text(&format!(
+            "&aMail sent to &f{target_name}"
+        )));
+        Ok(1)
+    }
+}
+
+pub struct MailReadHandler {
+    chat: Arc<Chat>,
+}
+
+impl CommandHandler for MailReadHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let name = sender.get_name();
+        let mails = self.chat.read_mail(&name);
+        if mails.is_empty() {
+            sender.send_message(format_text("&7No mail"));
+            return Ok(1);
+        }
+        sender.send_message(format_text("&6Mail:"));
+        for mail in mails {
+            sender.send_message(format_text(&format!(
+                "&e{}: &f{}",
+                mail.sender, mail.message
+            )));
+        }
+        Ok(1)
+    }
+}
+
+// ---------------- broadcast ----------------
+
+pub struct BroadcastHandler;
+
+impl CommandHandler for BroadcastHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let message = arg_string(&args, "message").unwrap_or_default();
+        server.broadcast(&format!("&6[Broadcast] &e{}", message));
+        sender.send_message(format_text("&aBroadcast sent"));
+        Ok(1)
+    }
+}
+
+pub struct BroadcastWorldHandler;
+
+impl CommandHandler for BroadcastWorldHandler {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        server: Server,
+        args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let message = arg_string(&args, "message").unwrap_or_default();
+        server.broadcast(&format!("&6[Broadcast] &e{}", message));
+        sender.send_message(format_text("&aBroadcast sent"));
+        Ok(1)
+    }
+}
+
+// ---------------- registration ----------------
+
+pub fn register(chat: Arc<Chat>, context: &Context) {
+    let msg = Command::new(&["msg".to_string(), "tell".to_string(), "w".to_string()], "Message a player")
+        .then(string_arg("target").then(greedy_arg("message").execute(MsgHandler {
+            chat: chat.clone(),
+        })));
+    context.register_command(msg, "essentials.msg");
+
+    let reply = Command::new(&["r".to_string(), "reply".to_string()], "Reply to a message")
+        .then(greedy_arg("message").execute(ReplyHandler {
+            chat: chat.clone(),
+        }));
+    context.register_command(reply, "essentials.reply");
+
+    let mail = Command::new(&["mail".to_string()], "Mail")
+        .then(
+            CommandNode::literal("send")
+                .then(string_arg("target").then(greedy_arg("message").execute(MailSendHandler {
+                    chat: chat.clone(),
+                }))),
+        )
+        .then(CommandNode::literal("read").execute(MailReadHandler { chat: chat.clone() }));
+    context.register_command(mail, "essentials.mail");
+
+    let broadcast = Command::new(&["broadcast".to_string(), "bc".to_string()], "Broadcast a message")
+        .then(greedy_arg("message").execute(BroadcastHandler));
+    context.register_command(broadcast, "essentials.broadcast");
+
+    let broadcastworld = Command::new(&["broadcastworld".to_string()], "Broadcast to world")
+        .then(greedy_arg("message").execute(BroadcastWorldHandler));
+    context.register_command(broadcastworld, "essentials.broadcastworld");
 }
