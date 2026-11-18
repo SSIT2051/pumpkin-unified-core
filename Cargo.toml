@@ -16,7 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 config = { version = "0.14", features = ["toml", "yaml"] }
 thiserror = "1.0"
-fs2 = "0.4"
+fs2 = { version = "0.4", optional = true }
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
 uuid = { version = "1.0", features = ["serde", "v4"], optional = true }
@@ -25,6 +25,7 @@ uuid = { version = "1.0", features = ["serde", "v4"], optional = true }
 default = []
 sqlite = ["rusqlite"]
 http = ["reqwest", "uuid"]
+file-locking = ["fs2"]
 
 [profile.release]
 lto = true

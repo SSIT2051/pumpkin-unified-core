@@ -1,8 +1,9 @@
 //! JSON file-based storage with file locking and batch writes.
 //!
-//! WASM-compatible, uses exclusive file locks for safety.
+//! WASM-compatible, uses exclusive file locks for safety (native only).
 
 use super::{StorageBackend, StorageBackendType, StorageError, StorageResult};
+#[cfg(feature = "file-locking")]
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -58,9 +59,11 @@ impl JsonStorage {
         let path = data_folder.join("data.json");
         let store = if path.exists() {
             let file = File::open(&path)?;
-            // Acquire shared lock for reading
+            // Acquire shared lock for reading (native only)
+            #[cfg(feature = "file-locking")]
             file.lock_shared().map_err(|e| StorageError::Lock(e.to_string()))?;
             let store: Store = serde_json::from_reader(&file).unwrap_or_default();
+            #[cfg(feature = "file-locking")]
             file.unlock().map_err(|e| StorageError::Lock(e.to_string()))?;
             store
         } else {
@@ -81,8 +84,10 @@ impl JsonStorage {
         let path = data_folder.join("data.json");
         let store = if path.exists() {
             let file = File::open(&path)?;
+            #[cfg(feature = "file-locking")]
             file.lock_shared().map_err(|e| StorageError::Lock(e.to_string()))?;
             let store: Store = serde_json::from_reader(&file).unwrap_or_default();
+            #[cfg(feature = "file-locking")]
             file.unlock().map_err(|e| StorageError::Lock(e.to_string()))?;
             store
         } else {
@@ -236,19 +241,22 @@ impl JsonStorage {
             }
         }
 
-        // Write to disk with exclusive lock
+        // Write to disk with exclusive lock (native only)
         let file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(&self.path)?;
         
+        #[cfg(feature = "file-locking")]
         file.lock_exclusive().map_err(|e| StorageError::Lock(e.to_string()))?;
         
         let store = self.store.read().map_err(|e| StorageError::Lock(e.to_string()))?;
         serde_json::to_writer(&file, &*store)?;
         
         file.flush()?;
+        
+        #[cfg(feature = "file-locking")]
         file.unlock().map_err(|e| StorageError::Lock(e.to_string()))?;
 
         Ok(())
