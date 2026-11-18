@@ -1,172 +1,104 @@
-use crate::utils::macros::*;
-use anyhow::Result;
-use async_trait::async_trait;
+//! WASI file-based key/value storage.
+//!
+//! Pumpkin plugins run inside a WebAssembly sandbox. The only durable storage is
+//! the plugin's private WASI data folder, exposed through the normal file system.
+//! This module persists a single JSON document (`<data_folder>/data.json`) that
+//! maps table names to key/value records. Values are stored as `serde_json::Value`
+//! so callers can (de)serialize their own typed structs.
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::Mutex;
 
-pub mod sqlite;
-pub mod redis;
-pub mod mysql;
+type Table = BTreeMap<String, serde_json::Value>;
 
-#[async_trait]
-pub trait Storage: Send + Sync {
-    async fn init(&self) -> Result<()>;
-    async fn shutdown(&self);
-    
-    async fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>>;
-    async fn set(&self, table: &str, key: &str, value: &[u8]) -> Result<()>;
-    async fn delete(&self, table: &str, key: &str) -> Result<()>;
-    async fn exists(&self, table: &str, key: &str) -> Result<bool>;
-    async fn keys(&self, table: &str, pattern: &str) -> Result<Vec<String>>;
-    
-    async fn query(&self, sql: &str, params: &[&dyn sqlx::Encode<'_, sqlx::Any>]) -> Result<Vec<HashMap<String, serde_json::Value>>>;
-    async fn execute(&self, sql: &str, params: &[&dyn sqlx::Encode<'_, sqlx::Any>]) -> Result<u64>;
+#[derive(Default, Serialize, Deserialize)]
+struct Store {
+    #[serde(default)]
+    tables: BTreeMap<String, Table>,
 }
 
-pub enum StorageBackend {
-    Sqlite(sqlite::SqliteStorage),
-    Redis(redis::RedisStorage),
-    Mysql(mysql::MysqlStorage),
+/// A small synchronous, file-backed store guarded by a `Mutex`.
+///
+/// The plugin trait requires `Send + Sync`, and the WASM runtime is effectively
+/// single-threaded, so a `Mutex` is cheap and safe here. Callers must not hold
+/// the internal lock across a host API call; each method locks, copies out the
+/// data it needs, and releases before returning.
+pub struct Storage {
+    store: Mutex<Store>,
+    path: String,
 }
 
-impl StorageBackend {
-    pub async fn new(config: &crate::config::StorageConfig) -> Result<Self> {
-        match config.backend.as_str() {
-            "sqlite" => Ok(StorageBackend::Sqlite(sqlite::SqliteStorage::new(&config.sqlite).await?)),
-            "redis" => Ok(StorageBackend::Redis(redis::RedisStorage::new(&config.redis).await?)),
-            "mysql" | "postgres" => Ok(StorageBackend::Mysql(mysql::MysqlStorage::new(&config.mysql).await?)),
-            _ => Err(anyhow::anyhow!("Unknown storage backend: {}", config.backend)),
-        }
-    }
-}
-
-#[async_trait]
-impl Storage for StorageBackend {
-    async fn init(&self) -> Result<()> {
-        match self {
-            StorageBackend::Sqlite(s) => s.init().await,
-            StorageBackend::Redis(s) => s.init().await,
-            StorageBackend::Mysql(s) => s.init().await,
-        }
-    }
-
-    async fn shutdown(&self) {
-        match self {
-            StorageBackend::Sqlite(s) => s.shutdown().await,
-            StorageBackend::Redis(s) => s.shutdown().await,
-            StorageBackend::Mysql(s) => s.shutdown().await,
-        }
-    }
-
-    async fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>> {
-        match self {
-            StorageBackend::Sqlite(s) => s.get(table, key).await,
-            StorageBackend::Redis(s) => s.get(table, key).await,
-            StorageBackend::Mysql(s) => s.get(table, key).await,
-        }
-    }
-
-    async fn set(&self, table: &str, key: &str, value: &[u8]) -> Result<()> {
-        match self {
-            StorageBackend::Sqlite(s) => s.set(table, key, value).await,
-            StorageBackend::Redis(s) => s.set(table, key, value).await,
-            StorageBackend::Mysql(s) => s.set(table, key, value).await,
-        }
-    }
-
-    async fn delete(&self, table: &str, key: &str) -> Result<()> {
-        match self {
-            StorageBackend::Sqlite(s) => s.delete(table, key).await,
-            StorageBackend::Redis(s) => s.delete(table, key).await,
-            StorageBackend::Mysql(s) => s.delete(table, key).await,
-        }
-    }
-
-    async fn exists(&self, table: &str, key: &str) -> Result<bool> {
-        match self {
-            StorageBackend::Sqlite(s) => s.exists(table, key).await,
-            StorageBackend::Redis(s) => s.exists(table, key).await,
-            StorageBackend::Mysql(s) => s.exists(table, key).await,
-        }
-    }
-
-    async fn keys(&self, table: &str, pattern: &str) -> Result<Vec<String>> {
-        match self {
-            StorageBackend::Sqlite(s) => s.keys(table, pattern).await,
-            StorageBackend::Redis(s) => s.keys(table, pattern).await,
-            StorageBackend::Mysql(s) => s.keys(table, pattern).await,
-        }
-    }
-
-    async fn query(&self, sql: &str, params: &[&dyn sqlx::Encode<'_, sqlx::Any>]) -> Result<Vec<HashMap<String, serde_json::Value>>> {
-        match self {
-            StorageBackend::Sqlite(s) => s.query(sql, params).await,
-            StorageBackend::Redis(s) => s.query(sql, params).await,
-            StorageBackend::Mysql(s) => s.query(sql, params).await,
-        }
-    }
-
-    async fn execute(&self, sql: &str, params: &[&dyn sqlx::Encode<'_, sqlx::Any>]) -> Result<u64> {
-        match self {
-            StorageBackend::Sqlite(s) => s.execute(sql, params).await,
-            StorageBackend::Redis(s) => s.execute(sql, params).await,
-            StorageBackend::Mysql(s) => s.execute(sql, params).await,
-        }
-    }
-}
-
-pub struct StorageManager {
-    backend: StorageBackend,
-}
-
-impl StorageManager {
-    pub fn new(config: &crate::config::Config) -> Self {
-        let backend = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                StorageBackend::new(&config.storage).await.expect("Failed to create storage backend")
-            })
-        });
-        Self { backend }
-    }
-
-    pub async fn init(&self) -> Result<()> {
-        self.backend.init().await
-    }
-
-    pub async fn shutdown(&self) {
-        self.backend.shutdown().await
-    }
-
-    pub fn backend(&self) -> &StorageBackend {
-        &self.backend
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializedData<T> {
-    pub data: T,
-    pub version: u32,
-    pub timestamp: i64,
-}
-
-impl<T> SerializedData<T>
-where
-    T: Serialize + for<'de> Deserialize<'de>,
-{
-    pub fn new(data: T) -> Self {
+impl Storage {
+    /// Creates a store rooted at `data_folder`, loading any existing `data.json`.
+    pub fn new(data_folder: &str) -> Self {
+        let path = format!("{data_folder}/data.json");
+        let store = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         Self {
-            data,
-            version: 1,
-            timestamp: chrono::Utc::now().timestamp(),
+            store: Mutex::new(store),
+            path,
         }
     }
 
-    pub fn serialize(&self) -> Result<Vec<u8>> {
-        Ok(serde_json::to_vec(self)?)
+    fn persist(&self, store: &Store) {
+        if let Ok(json) = serde_json::to_string(store) {
+            let _ = std::fs::write(&self.path, json);
+        }
     }
 
-    pub fn deserialize(bytes: &[u8]) -> Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
+    /// Loads and deserializes `key` from `table`, if present.
+    pub fn get<T: for<'de> Deserialize<'de>>(&self, table: &str, key: &str) -> Option<T> {
+        let store = self.store.lock().ok()?;
+        store
+            .tables
+            .get(table)
+            .and_then(|t| t.get(key))
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    /// Serializes and stores `value` under `key` in `table`, then flushes to disk.
+    pub fn set<T: Serialize>(&self, table: &str, key: &str, value: &T) {
+        let Ok(mut store) = self.store.lock() else {
+            return;
+        };
+        let Ok(json) = serde_json::to_value(value) else {
+            return;
+        };
+        store
+            .tables
+            .entry(table.to_string())
+            .or_default()
+            .insert(key.to_string(), json);
+        self.persist(&store);
+    }
+
+    /// Removes `key` from `table` and flushes to disk.
+    pub fn delete(&self, table: &str, key: &str) {
+        let Ok(mut store) = self.store.lock() else {
+            return;
+        };
+        if let Some(t) = store.tables.get_mut(table) {
+            t.remove(key);
+        }
+        self.persist(&store);
+    }
+
+    /// Returns all keys stored in `table`.
+    pub fn keys(&self, table: &str) -> Vec<String> {
+        self.store
+            .lock()
+            .ok()
+            .and_then(|s| s.tables.get(table).map(|t| t.keys().cloned().collect()))
+            .unwrap_or_default()
+    }
+
+    /// Returns all deserialized values in `table`.
+    pub fn values<T: for<'de> Deserialize<'de>>(&self, table: &str) -> Vec<T> {
+        let keys = self.keys(table);
+        keys.iter().filter_map(|k| self.get::<T>(table, k)).collect()
     }
 }

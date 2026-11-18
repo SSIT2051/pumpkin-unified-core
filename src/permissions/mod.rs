@@ -1,231 +1,290 @@
-use crate::storage::StorageBackend;
-use crate::utils::macros::*;
-use anyhow::Result;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use uuid::Uuid;
+//! LuckPerms-compatible permission engine.
+//!
+//! Stores per-user and per-group permission nodes plus group inheritance, and
+//! resolves effective permissions with wildcard matching. Data is persisted via
+//! the file-based [`Storage`].
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::storage::Storage;
+use std::collections::HashSet;
+use std::sync::Arc;
+
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct PermissionNode {
     pub node: String,
     pub value: bool,
-    pub server: Option<String>,
-    pub world: Option<String>,
-    pub expiry: Option<i64>,
-    pub context: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UserData {
-    pub uuid: Uuid,
+    pub uuid: String,
     pub name: String,
+    #[serde(default)]
     pub permissions: Vec<PermissionNode>,
+    #[serde(default)]
     pub groups: Vec<String>,
-    pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GroupData {
     pub name: String,
+    #[serde(default)]
     pub permissions: Vec<PermissionNode>,
+    #[serde(default)]
     pub parents: Vec<String>,
+    #[serde(default)]
     pub weight: i32,
+    #[serde(default)]
     pub display_name: Option<String>,
-    pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrackData {
     pub name: String,
+    #[serde(default)]
     pub groups: Vec<String>,
 }
 
-pub struct PermissionsModule {
-    storage: Arc<StorageBackend>,
-    users: Arc<DashMap<Uuid, UserData>>,
-    groups: Arc<DashMap<String, GroupData>>,
-    tracks: Arc<DashMap<String, TrackData>>,
-    config: Arc<crate::config::PermissionsConfig>,
+pub struct Permissions {
+    storage: Arc<Storage>,
+    default_group: String,
 }
 
-impl PermissionsModule {
-    pub fn new(storage: Arc<StorageBackend>) -> Self {
-        let config = Arc::new(crate::config::Config::default().permissions);
-        Self {
+impl Permissions {
+    pub fn new(storage: Arc<Storage>) -> Self {
+        let perms = Self {
             storage,
-            users: Arc::new(DashMap::new()),
-            groups: Arc::new(DashMap::new()),
-            tracks: Arc::new(DashMap::new()),
-            config,
-        }
-    }
-
-    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::PermissionsConfig>) -> Self {
-        Self {
-            storage,
-            users: Arc::new(DashMap::new()),
-            groups: Arc::new(DashMap::new()),
-            tracks: Arc::new(DashMap::new()),
-            config,
-        }
-    }
-
-    pub async fn load_data(&self) -> Result<()> {
-        for key in self.storage.keys("users", "%").await? {
-            if let Some(data) = self.storage.get("users", &key).await? {
-                let entry: crate::storage::SerializedData<UserData> = crate::storage::SerializedData::deserialize(&data)?;
-                self.users.insert(entry.data.uuid, entry.data);
-            }
-        }
-        for key in self.storage.keys("groups", "%").await? {
-            if let Some(data) = self.storage.get("groups", &key).await? {
-                let entry: crate::storage::SerializedData<GroupData> = crate::storage::SerializedData::deserialize(&data)?;
-                self.groups.insert(entry.data.name.clone(), entry.data);
-            }
-        }
-        for key in self.storage.keys("tracks", "%").await? {
-            if let Some(data) = self.storage.get("tracks", &key).await? {
-                let entry: crate::storage::SerializedData<TrackData> = crate::storage::SerializedData::deserialize(&data)?;
-                self.tracks.insert(entry.data.name.clone(), entry.data);
-            }
-        }
-        
-        if !self.groups.contains_key(&self.config.default_group) {
-            self.create_group(self.config.default_group.clone()).await?;
-        }
-        
-        Ok(())
-    }
-
-    pub async fn create_group(&self, name: String) -> Result<()> {
-        let group = GroupData {
-            name: name.clone(),
-            permissions: vec![],
-            parents: vec![],
-            weight: 0,
-            display_name: None,
-            metadata: HashMap::new(),
+            default_group: "default".to_string(),
         };
-        let data = crate::storage::SerializedData::new(group.clone()).serialize()?;
-        self.storage.set("groups", &name, &data).await?;
-        self.groups.insert(name, group);
-        Ok(())
+        perms.ensure_default_group();
+        perms
     }
 
-    pub fn get_user(&self, uuid: Uuid) -> Option<UserData> {
-        self.users.get(&uuid).map(|u| u.clone())
+    fn ensure_default_group(&self) {
+        if self.get_group(&self.default_group).is_none() {
+            self.create_group(&self.default_group);
+        }
     }
+
+    // ----- users -----
+
+    pub fn get_user(&self, uuid: &str) -> Option<UserData> {
+        self.storage.get("users", uuid)
+    }
+
+    pub fn find_user_by_name(&self, name: &str) -> Option<UserData> {
+        for key in self.storage.keys("users") {
+            if let Some(user) = self.storage.get::<UserData>("users", &key) {
+                if user.name.eq_ignore_ascii_case(name) {
+                    return Some(user);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn save_user(&self, user: &UserData) {
+        self.storage.set("users", &user.uuid, user);
+    }
+
+    pub fn set_user_permission(&self, uuid: &str, name: &str, node: String, value: bool) {
+        let mut user = self.get_user(uuid).unwrap_or(UserData {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            permissions: Vec::new(),
+            groups: Vec::new(),
+        });
+        user.name = name.to_string();
+        user.permissions.retain(|p| p.node != node);
+        user.permissions.push(PermissionNode { node, value });
+        self.save_user(&user);
+    }
+
+    pub fn unset_user_permission(&self, uuid: &str, node: &str) {
+        if let Some(mut user) = self.get_user(uuid) {
+            user.permissions.retain(|p| p.node != node);
+            self.save_user(&user);
+        }
+    }
+
+    pub fn add_user_group(&self, uuid: &str, name: &str, group: String) {
+        let mut user = self.get_user(uuid).unwrap_or(UserData {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            permissions: Vec::new(),
+            groups: Vec::new(),
+        });
+        user.name = name.to_string();
+        if !user.groups.contains(&group) {
+            user.groups.push(group);
+            self.save_user(&user);
+        }
+    }
+
+    pub fn remove_user_group(&self, uuid: &str, group: &str) {
+        if let Some(mut user) = self.get_user(uuid) {
+            user.groups.retain(|g| g != group);
+            self.save_user(&user);
+        }
+    }
+
+    // ----- groups -----
 
     pub fn get_group(&self, name: &str) -> Option<GroupData> {
-        self.groups.get(name).map(|g| g.clone())
+        self.storage.get("groups", name)
     }
 
-    pub fn has_permission(&self, uuid: Uuid, permission: &str, contexts: &HashMap<String, String>) -> bool {
+    pub fn create_group(&self, name: &str) {
+        if self.get_group(name).is_none() {
+            let group = GroupData {
+                name: name.to_string(),
+                permissions: Vec::new(),
+                parents: Vec::new(),
+                weight: 0,
+                display_name: None,
+            };
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_group(&self, name: &str) {
+        self.storage.delete("groups", name);
+    }
+
+    pub fn list_groups(&self) -> Vec<GroupData> {
+        self.storage.values("groups")
+    }
+
+    pub fn set_group_permission(&self, name: &str, node: String, value: bool) {
+        if let Some(mut group) = self.get_group(name) {
+            group.permissions.retain(|p| p.node != node);
+            group.permissions.push(PermissionNode { node, value });
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    pub fn unset_group_permission(&self, name: &str, node: &str) {
+        if let Some(mut group) = self.get_group(name) {
+            group.permissions.retain(|p| p.node != node);
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    pub fn add_group_parent(&self, name: &str, parent: String) {
+        if let Some(mut group) = self.get_group(name) {
+            if !group.parents.contains(&parent) {
+                group.parents.push(parent);
+                self.storage.set("groups", name, &group);
+            }
+        }
+    }
+
+    pub fn remove_group_parent(&self, name: &str, parent: &str) {
+        if let Some(mut group) = self.get_group(name) {
+            group.parents.retain(|p| p != parent);
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    pub fn set_group_weight(&self, name: &str, weight: i32) {
+        if let Some(mut group) = self.get_group(name) {
+            group.weight = weight;
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    pub fn set_group_display_name(&self, name: &str, display_name: String) {
+        if let Some(mut group) = self.get_group(name) {
+            group.display_name = Some(display_name);
+            self.storage.set("groups", name, &group);
+        }
+    }
+
+    // ----- tracks -----
+
+    pub fn create_track(&self, name: &str) {
+        if self.get_track(name).is_none() {
+            let track = TrackData {
+                name: name.to_string(),
+                groups: Vec::new(),
+            };
+            self.storage.set("tracks", name, &track);
+        }
+    }
+
+    pub fn get_track(&self, name: &str) -> Option<TrackData> {
+        self.storage.get("tracks", name)
+    }
+
+    pub fn delete_track(&self, name: &str) {
+        self.storage.delete("tracks", name);
+    }
+
+    pub fn list_tracks(&self) -> Vec<TrackData> {
+        self.storage.values("tracks")
+    }
+
+    pub fn append_track(&self, name: &str, group: String) {
+        if let Some(mut track) = self.get_track(name) {
+            if !track.groups.contains(&group) {
+                track.groups.push(group);
+                self.storage.set("tracks", name, &track);
+            }
+        }
+    }
+
+    // ----- resolution -----
+
+    #[allow(dead_code)]
+    fn collect_group_permissions(
+        &self,
+        name: &str,
+        out: &mut Vec<PermissionNode>,
+        visited: &mut HashSet<String>,
+    ) {
+        if !visited.insert(name.to_string()) {
+            return;
+        }
+        if let Some(group) = self.get_group(name) {
+            out.extend(group.permissions.iter().cloned());
+            for parent in &group.parents {
+                self.collect_group_permissions(parent, out, visited);
+            }
+        }
+    }
+
+    /// Resolves whether `uuid` has `node`, considering group inheritance and
+    /// wildcards. Exact matches override wildcard matches; user nodes override
+    /// group nodes.
+    #[allow(dead_code)]
+    pub fn has_permission(&self, uuid: &str, node: &str) -> bool {
         let user = match self.get_user(uuid) {
             Some(u) => u,
             None => return false,
         };
-        
-        let mut all_perms = user.permissions.clone();
-        
-        for group_name in &user.groups {
-            if let Some(group) = self.get_group(group_name) {
-                all_perms.extend(group.permissions);
-                for parent in &group.parents {
-                    if let Some(parent_group) = self.get_group(parent) {
-                        all_perms.extend(parent_group.permissions);
-                    }
+
+        let mut perms: Vec<PermissionNode> = Vec::new();
+        let mut visited = HashSet::new();
+        for group in &user.groups {
+            self.collect_group_permissions(group, &mut perms, &mut visited);
+        }
+        // User nodes are appended last so they win over group nodes.
+        perms.extend(user.permissions.iter().cloned());
+
+        let mut exact: Option<bool> = None;
+        let mut wildcard: Option<bool> = None;
+        for perm in &perms {
+            if perm.node == node {
+                exact = Some(perm.value);
+            } else if let Some(prefix) = perm.node.strip_suffix(".*") {
+                if node.starts_with(prefix) {
+                    wildcard = Some(perm.value);
                 }
             }
         }
-        
-        for perm in all_perms {
-            if perm.node == permission || self.wildcard_match(&perm.node, permission) {
-                if !perm.value {
-                    return false;
-                }
-                if let Some(expiry) = perm.expiry {
-                    if chrono::Utc::now().timestamp() > expiry {
-                        continue;
-                    }
-                }
-                if !self.contexts_match(&perm.context, contexts) {
-                    return false;
-                }
-                return true;
-            }
-        }
-        false
-    }
 
-    fn wildcard_match(&self, pattern: &str, permission: &str) -> bool {
-        if pattern.ends_with(".*") {
-            let prefix = &pattern[..pattern.len() - 1];
-            permission.starts_with(prefix)
-        } else {
-            false
-        }
-    }
-
-    fn contexts_match(&self, perm_contexts: &HashMap<String, String>, check_contexts: &HashMap<String, String>) -> bool {
-        for (key, value) in perm_contexts {
-            if let Some(check_value) = check_contexts.get(key) {
-                if check_value != value {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-        true
-    }
-
-    pub async fn set_user_permission(&self, uuid: Uuid, node: String, value: bool, contexts: HashMap<String, String>) -> Result<()> {
-        let mut user = self.get_user(uuid).unwrap_or_else(|| UserData {
-            uuid,
-            name: String::new(),
-            permissions: vec![],
-            groups: vec![],
-            metadata: HashMap::new(),
-        });
-        
-        user.permissions.retain(|p| p.node != node || p.context != contexts);
-        user.permissions.push(PermissionNode {
-            node,
-            value,
-            server: None,
-            world: None,
-            expiry: None,
-            context: contexts,
-        });
-        
-        let data = crate::storage::SerializedData::new(user.clone()).serialize()?;
-        self.storage.set("users", &uuid.to_string(), &data).await?;
-        self.users.insert(uuid, user);
-        Ok(())
-    }
-
-    pub async fn add_user_group(&self, uuid: Uuid, group: String) -> Result<()> {
-        let mut user = self.get_user(uuid).unwrap_or_else(|| UserData {
-            uuid,
-            name: String::new(),
-            permissions: vec![],
-            groups: vec![],
-            metadata: HashMap::new(),
-        });
-        
-        if !user.groups.contains(&group) {
-            user.groups.push(group);
-            let data = crate::storage::SerializedData::new(user.clone()).serialize()?;
-            self.storage.set("users", &uuid.to_string(), &data).await?;
-            self.users.insert(uuid, user);
-        }
-        Ok(())
-    }
-
-    pub fn register_commands(&self, context: &mut pumpkin_plugin_api::context::Context) {
-        crate::permissions::commands::register(self.clone(), context);
+        exact.or(wildcard).unwrap_or(false)
     }
 }

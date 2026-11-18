@@ -1,181 +1,122 @@
-use crate::storage::{Storage, StorageBackend, SerializedData};
-use crate::utils::macros::*;
-use crate::utils::text::format_text;
-use anyhow::Result;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
+//! Economy module: balances, payments, and top-balance queries.
+//!
+//! Balances are keyed by the player's UUID string and persisted through the
+//! file-based [`Storage`]. All operations are synchronous; the WASM plugin API
+//! delivers command handlers on a single thread.
+
+use crate::storage::Storage;
 use std::sync::Arc;
-use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EconomyBalance {
-    pub uuid: Uuid,
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EconomyAccount {
+    pub uuid: String,
+    pub name: String,
     pub balance: f64,
-    pub last_updated: i64,
+    pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EconomyTransaction {
-    pub id: Uuid,
-    pub from_uuid: Option<Uuid>,
-    pub to_uuid: Uuid,
-    pub amount: f64,
-    pub transaction_type: TransactionType,
-    pub timestamp: i64,
-    pub note: Option<String>,
+pub struct Economy {
+    storage: Arc<Storage>,
+    starting_balance: f64,
+    min_money: f64,
+    max_money: f64,
+    currency_symbol: String,
+    currency_format: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TransactionType {
-    Give,
-    Take,
-    Set,
-    Pay,
-    Interest,
-    Kit,
-    Shop,
+impl Default for Economy {
+    fn default() -> Self {
+        Self::new(Arc::new(Storage::new(".")))
+    }
 }
 
-pub struct EconomyModule {
-    storage: Arc<StorageBackend>,
-    cache: Arc<DashMap<Uuid, EconomyBalance>>,
-    config: Arc<crate::config::EconomyConfig>,
-}
-
-impl EconomyModule {
-    pub fn new(storage: Arc<StorageBackend>) -> Self {
-        let config = Arc::new(crate::config::Config::default().economy);
+impl Economy {
+    pub fn new(storage: Arc<Storage>) -> Self {
         Self {
             storage,
-            cache: Arc::new(DashMap::new()),
-            config,
+            starting_balance: 0.0,
+            min_money: 0.0,
+            max_money: f64::MAX,
+            currency_symbol: "$".to_string(),
+            currency_format: "{symbol}{amount}".to_string(),
         }
     }
 
-    pub fn with_config(storage: Arc<StorageBackend>, config: Arc<crate::config::EconomyConfig>) -> Self {
-        Self {
-            storage,
-            cache: Arc::new(DashMap::new()),
-            config,
-        }
+    fn key(&self, uuid: &str) -> String {
+        uuid.to_string()
     }
 
-    pub async fn get_balance(&self, uuid: Uuid) -> Result<f64> {
-        if let Some(cached) = self.cache.get(&uuid) {
-            return Ok(cached.balance);
+    /// Returns the balance for `uuid`, defaulting to the configured starting balance.
+    pub fn get_balance(&self, uuid: &str) -> f64 {
+        if let Some(account) = self
+            .storage
+            .get::<EconomyAccount>("economy", &self.key(uuid))
+        {
+            return account.balance;
         }
-        
-        let key = uuid.to_string();
-        if let Some(data) = self.storage.get("economy_balance", &key).await? {
-            let balance_data: SerializedData<EconomyBalance> = SerializedData::deserialize(&data)?;
-            let balance = balance_data.data.balance;
-            self.cache.insert(uuid, balance_data.data);
-            return Ok(balance);
-        }
-        
-        let new_balance = EconomyBalance {
-            uuid,
-            balance: self.config.starting_balance,
-            last_updated: chrono::Utc::now().timestamp(),
-        };
-        self.set_balance(uuid, self.config.starting_balance).await?;
-        Ok(self.config.starting_balance)
+        self.starting_balance
     }
 
-    pub async fn set_balance(&self, uuid: Uuid, amount: f64) -> Result<()> {
-        let clamped = amount.clamp(self.config.min_money, self.config.max_money);
-        let balance = EconomyBalance {
-            uuid,
+    /// Sets the balance for `uuid`, clamped to the configured min/max.
+    pub fn set_balance(&self, uuid: &str, name: &str, amount: f64) -> f64 {
+        let clamped = amount.clamp(self.min_money, self.max_money);
+        let account = EconomyAccount {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
             balance: clamped,
-            last_updated: chrono::Utc::now().timestamp(),
+            updated_at: crate::utils::time::now_timestamp(),
         };
-        
-        let data = SerializedData::new(balance.clone()).serialize()?;
-        self.storage.set("economy_balance", &uuid.to_string(), &data).await?;
-        self.cache.insert(uuid, balance);
-        Ok(())
+        self.storage.set("economy", &self.key(uuid), &account);
+        clamped
     }
 
-    pub async fn add_balance(&self, uuid: Uuid, amount: f64) -> Result<f64> {
-        let current = self.get_balance(uuid).await?;
-        let new_balance = (current + amount).clamp(self.config.min_money, self.config.max_money);
-        self.set_balance(uuid, new_balance).await?;
-        Ok(new_balance)
+    /// Adds `amount` to the balance and returns the new balance.
+    pub fn add_balance(&self, uuid: &str, name: &str, amount: f64) -> f64 {
+        let new_balance = (self.get_balance(uuid) + amount).clamp(self.min_money, self.max_money);
+        self.set_balance(uuid, name, new_balance)
     }
 
-    pub async fn take_balance(&self, uuid: Uuid, amount: f64) -> Result<f64> {
-        self.add_balance(uuid, -amount).await
+    /// Subtracts `amount` from the balance and returns the new balance.
+    pub fn take_balance(&self, uuid: &str, name: &str, amount: f64) -> f64 {
+        self.add_balance(uuid, name, -amount)
     }
 
-    pub async fn pay(&self, from: Uuid, to: Uuid, amount: f64) -> Result<()> {
-        if from == to {
-            return Err(anyhow::anyhow!("Cannot pay yourself"));
-        }
-        
-        let from_balance = self.get_balance(from).await?;
-        if from_balance < amount {
-            return Err(anyhow::anyhow!("Insufficient funds"));
-        }
-        
-        self.take_balance(from, amount).await?;
-        self.add_balance(to, amount).await?;
-        
-        if self.config.log_transactions {
-            self.log_transaction(None, to, amount, TransactionType::Pay, Some(format!("Payment from {}", from))).await?;
-            self.log_transaction(Some(from), to, amount, TransactionType::Pay, Some(format!("Payment to {}", to))).await?;
-        }
-        
-        Ok(())
-    }
-
-    pub async fn log_transaction(
+    /// Transfers `amount` from `from_uuid` to `to_uuid`.
+    pub fn pay(
         &self,
-        from: Option<Uuid>,
-        to: Uuid,
+        from_uuid: &str,
+        from_name: &str,
+        to_uuid: &str,
+        to_name: &str,
         amount: f64,
-        tx_type: TransactionType,
-        note: Option<String>,
-    ) -> Result<()> {
-        let transaction = EconomyTransaction {
-            id: Uuid::new_v4(),
-            from_uuid: from,
-            to_uuid: to,
-            amount,
-            transaction_type: tx_type,
-            timestamp: chrono::Utc::now().timestamp(),
-            note,
-        };
-        
-        let data = SerializedData::new(transaction).serialize()?;
-        self.storage.set("economy_transactions", &transaction.id.to_string(), &data).await?;
-        Ok(())
-    }
-
-    pub async fn get_top_balances(&self, limit: usize) -> Result<Vec<(Uuid, f64)>> {
-        let keys = self.storage.keys("economy_balance", "%").await?;
-        let mut balances = Vec::new();
-        
-        for key in keys {
-            if let Ok(uuid) = Uuid::parse_str(&key) {
-                if let Some(data) = self.storage.get("economy_balance", &key).await? {
-                    let balance_data: SerializedData<EconomyBalance> = SerializedData::deserialize(&data)?;
-                    balances.push((uuid, balance_data.data.balance));
-                }
-            }
+    ) -> Result<f64, String> {
+        if from_uuid == to_uuid {
+            return Err("You cannot pay yourself".to_string());
         }
-        
-        balances.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        balances.truncate(limit);
-        Ok(balances)
+        if amount <= 0.0 {
+            return Err("Amount must be positive".to_string());
+        }
+        if self.get_balance(from_uuid) < amount {
+            return Err("Insufficient funds".to_string());
+        }
+        self.take_balance(from_uuid, from_name, amount);
+        Ok(self.add_balance(to_uuid, to_name, amount))
     }
 
+    /// Returns up to `limit` accounts ordered by balance (descending).
+    pub fn top_balances(&self, limit: usize) -> Vec<EconomyAccount> {
+        let mut accounts: Vec<EconomyAccount> = self.storage.values("economy");
+        accounts.sort_by(|a, b| b.balance.partial_cmp(&a.balance).unwrap_or(std::cmp::Ordering::Equal));
+        accounts.truncate(limit);
+        accounts
+    }
+
+    /// Formats an amount using the configured currency symbol/format.
     pub fn format_money(&self, amount: f64) -> String {
-        self.config.currency_format
-            .replace("{symbol}", &self.config.currency_symbol)
-            .replace("{amount}", &format!("{:.2}", amount))
-    }
-
-    pub fn register_commands(&self, context: &mut pumpkin_plugin_api::context::Context) {
-        crate::economy::commands::register(self.clone(), context);
+        self.currency_format
+            .replace("{symbol}", &self.currency_symbol)
+            .replace("{amount}", &format!("{amount:.2}"))
     }
 }

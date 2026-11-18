@@ -11,8 +11,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: pumpkin-unified-core.so
-      
+          name: pumpkin-unified-core.wasm
+
       - name: Deploy via SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.PUMPKIN_VM_SSH_KEY }}
@@ -21,13 +21,13 @@ jobs:
         run: |
           echo "$SSH_PRIVATE_KEY" > key.pem
           chmod 600 key.pem
-          
-          scp -i key.pem -o StrictHostKeyChecking=no libpumpkin_unified_core.so $SSH_USER@$SSH_HOST:/root/pumpkin-server/plugins/pumpkin-unified-core.so.new
-          
+
+          scp -i key.pem -o StrictHostKeyChecking=no pumpkin_unified_core.wasm $SSH_USER@$SSH_HOST:/root/pumpkin-server/plugins/pumpkin-unified-core.wasm.new
+
           ssh -i key.pem -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
             cd /root/pumpkin-server
-            mv plugins/pumpkin-unified-core.so plugins/pumpkin-unified-core.so.$(date +%s).old 2>/dev/null || true
-            mv plugins/pumpkin-unified-core.so.new plugins/pumpkin-unified-core.so
+            mv plugins/pumpkin-unified-core.wasm plugins/pumpkin-unified-core.wasm.$(date +%s).old 2>/dev/null || true
+            mv plugins/pumpkin-unified-core.wasm.new plugins/pumpkin-unified-core.wasm
             sudo systemctl restart pumpkin
             sleep 10
             ./verify-plugin.sh
