@@ -325,11 +325,6 @@ impl CommandHandler for UnBanHandler {
         Ok(1)
     }
 }
-            sender.send_message(format_text(&format!("&c{} is not banned", name)));
-        }
-        Ok(1)
-    }
-}
 
 // ---------------- mute ----------------
 
