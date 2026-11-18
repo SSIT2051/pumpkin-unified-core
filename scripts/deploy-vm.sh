@@ -1,85 +1,50 @@
 #!/bin/bash
-# Deploy pumpkin-unified-core.wasm to the pumpkin-vm and clean up disk.
-# Designed to be run from the build host. Handles a flaky/overloaded VM by
-# retrying and by cleaning disk BEFORE deploying.
+# Deploy pumpkin-unified-core.wasm to the pumpkin-vm.
+#
+# Uses the pre-configured `pumpkin-vm` SSH alias (Ed25519 key auth, SSH port
+# 25726). NEVER use port 25491 (that is the Minecraft game port) or password
+# auth.
+#
+# Procedure:
+#   1. Upload the .wasm to the plugins folder.
+#   2. Stop the running server with SIGINT (graceful).
+#   3. Start a fresh background instance in /root/pumpkin-server.
+#   4. Verify /tmp/pumpkin.log shows the plugin initializing without errors.
 set -uo pipefail
 
-VM_HOST="${VM_HOST:-th-bkk02.altare.global}"
-VM_PORT="${VM_PORT:-25491}"
-VM_USER="${VM_USER:-root}"
-VM_PASS="${VM_PASS:-1234567890}"
 WASM_PATH="${1:-/tmp/artifact/pumpkin_unified_core.wasm}"
+SSH_HOST="${SSH_HOST:-pumpkin-vm}"
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=40 -o ServerAliveInterval=10 -o ServerAliveCountMax=3"
-
-echo "=== pumpkin-vm deploy + cleanup ==="
-echo "Target: $VM_USER@$VM_HOST:$VM_PORT"
-echo "Plugin: $WASM_PATH ($(stat -c%s "$WASM_PATH" 2>/dev/null || echo '?') bytes)"
-
-# Try to connect up to 5 times.
-connected=0
-for attempt in 1 2 3 4 5; do
-    echo "--- connection attempt $attempt ---"
-    if timeout 45 sshpass -p "$VM_PASS" ssh $SSH_OPTS "$VM_USER@$VM_HOST" -p "$VM_PORT" "echo CONNECTED" 2>/dev/null | grep -q CONNECTED; then
-        connected=1
-        break
-    fi
-    echo "attempt $attempt failed; waiting 15s..."
-    sleep 15
-done
-
-if [ "$connected" -ne 1 ]; then
-    echo "ERROR: could not connect to VM after 5 attempts (VM likely overloaded)"
+if [ ! -f "$WASM_PATH" ]; then
+    echo "ERROR: wasm artifact not found at $WASM_PATH"
     exit 1
 fi
 
-echo "=== Step 1: disk cleanup (safe targets only) ==="
-timeout 60 sshpass -p "$VM_PASS" ssh $SSH_OPTS "$VM_USER@$VM_HOST" -p "$VM_PORT" 'bash -s' <<'CLEANUP'
+echo "=== pumpkin-vm deploy ==="
+echo "Target: $SSH_HOST"
+echo "Plugin: $WASM_PATH ($(stat -c%s "$WASM_PATH") bytes)"
+
+echo "=== Step 1: upload plugin ==="
+scp -o StrictHostKeyChecking=no "$WASM_PATH" "$SSH_HOST:/root/pumpkin-server/plugins/pumpkin-unified-core.wasm" || exit 1
+
+echo "=== Step 2: graceful restart ==="
+ssh -o StrictHostKeyChecking=no "$SSH_HOST" 'bash -s' <<'RESTART'
 set -uo pipefail
-echo "Before:"
-df -h / | tail -1
-
-# Clean old plugin backups (keep newest 1).
-cd /root/pumpkin-server 2>/dev/null || cd /root
-ls -1t plugins/pumpkin-unified-core.wasm.*.old plugins/pumpkin-unified-core.wasm.*.bak 2>/dev/null | tail -n +2 | xargs -r rm -f
-ls -1t plugins/*.so.*.old plugins/*.so.*.bak 2>/dev/null | tail -n +3 | xargs -r rm -f
-
-# Clean cargo/target caches if present (big wins, safe).
-rm -rf /root/.cargo/registry/cache/* /root/.cargo/git/checkouts/* 2>/dev/null || true
-find /root -maxdepth 4 -type d -name target -path '*/pumpkin*' -prune -exec rm -rf {} + 2>/dev/null || true
-
-# Clean old logs (keep last 3).
-find /root/pumpkin-server -name '*.log.gz' -mtime +7 -delete 2>/dev/null || true
-find /root/pumpkin-server/logs -name '*.log' -mtime +7 -delete 2>/dev/null || true
-
-# Clean apt cache (safe).
-apt-get clean 2>/dev/null || true
-rm -rf /var/cache/apt/archives/*.deb 2>/dev/null || true
-
-# Clean /tmp old files (safe, >1 day).
-find /tmp -maxdepth 2 -type f -mtime +1 -delete 2>/dev/null || true
-
-echo "After:"
-df -h / | tail -1
-CLEANUP
-
-echo "=== Step 2: upload plugin ==="
-timeout 90 sshpass -p "$VM_PASS" scp $SSH_OPTS "$WASM_PATH" "$VM_USER@$VM_HOST:/root/pumpkin-server/plugins/pumpkin-unified-core.wasm.new" 2>&1 | tail -3
-
-echo "=== Step 3: swap + restart ==="
-timeout 60 sshpass -p "$VM_PASS" ssh $SSH_OPTS "$VM_USER@$VM_HOST" -p "$VM_PORT" 'bash -s' <<'DEPLOY'
-set -uo pipefail
+pkill -INT -f "./pumpkin" || true
+sleep 4
 cd /root/pumpkin-server
-# Backup current, install new.
-[ -f plugins/pumpkin-unified-core.wasm ] && mv plugins/pumpkin-unified-core.wasm "plugins/pumpkin-unified-core.wasm.$(date +%s).old" 2>/dev/null
-mv plugins/pumpkin-unified-core.wasm.new plugins/pumpkin-unified-core.wasm
-echo "Installed plugin:"
-ls -la plugins/pumpkin-unified-core.wasm
-# Restart server.
-sudo systemctl restart pumpkin 2>/dev/null || echo "systemctl restart failed (may need manual restart)"
-sleep 8
-echo "Server status:"
-sudo systemctl is-active pumpkin 2>/dev/null || echo "unknown"
-DEPLOY
+nohup ./pumpkin > /tmp/pumpkin.log 2>&1 </dev/null &
+sleep 4
+RESTART
+
+echo "=== Step 3: verify ==="
+ssh -o StrictHostKeyChecking=no "$SSH_HOST" 'bash -s' <<'VERIFY'
+echo "--- pumpkin process ---"
+ps aux | grep '[.]/pumpkin' | head -2 || echo "NOT RUNNING"
+echo "--- plugin lines ---"
+grep -i 'pumpkin-unified' /tmp/pumpkin.log | head -10
+echo "--- errors (if any) ---"
+grep -iE 'error|failed|panic' /tmp/pumpkin.log | grep -iv 'error_|no errors' | head -10 || echo "none"
+VERIFY
 
 echo "=== Deploy complete ==="

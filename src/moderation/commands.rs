@@ -501,13 +501,13 @@ fn target_reason() -> CommandNode {
 pub fn register(moderation: Arc<Moderation>, context: &Context) {
     let kick = Command::new(&["kick".to_string()], "Kick a player")
         .then(target_reason().execute(KickHandler));
-    context.register_command(kick, "essentials.kick");
+    context.register_command(kick, "pumpkin-unified-core.essentials.kick");
 
     let ban = Command::new(&["ban".to_string()], "Ban a player")
         .then(target_reason().execute(BanHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(ban, "essentials.ban");
+    context.register_command(ban, "pumpkin-unified-core.essentials.ban");
 
     let tempban = Command::new(&["tempban".to_string()], "Temporarily ban a player").then(
         string_arg("target")
@@ -515,49 +515,49 @@ pub fn register(moderation: Arc<Moderation>, context: &Context) {
                 moderation: moderation.clone(),
             }))),
     );
-    context.register_command(tempban, "essentials.tempban");
+    context.register_command(tempban, "pumpkin-unified-core.essentials.tempban");
 
     let unban = Command::new(&["unban".to_string()], "Unban a player")
         .then(string_arg("target").execute(UnBanHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(unban, "essentials.unban");
+    context.register_command(unban, "pumpkin-unified-core.essentials.unban");
 
     let mute = Command::new(&["mute".to_string()], "Mute a player")
         .then(target_reason().execute(MuteHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(mute, "essentials.mute");
+    context.register_command(mute, "pumpkin-unified-core.essentials.mute");
 
     let unmute = Command::new(&["unmute".to_string()], "Unmute a player")
         .then(string_arg("target").execute(UnMuteHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(unmute, "essentials.unmute");
+    context.register_command(unmute, "pumpkin-unified-core.essentials.unmute");
 
     let fly = Command::new(&["fly".to_string()], "Toggle flight")
         .then(string_arg("target").execute(FlyHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(fly, "essentials.fly");
+    context.register_command(fly, "pumpkin-unified-core.essentials.fly");
 
     let god = Command::new(&["god".to_string()], "Toggle god mode")
         .then(string_arg("target").execute(GodHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(god, "essentials.god");
+    context.register_command(god, "pumpkin-unified-core.essentials.god");
 
     let heal = Command::new(&["heal".to_string()], "Heal a player")
         .then(string_arg("target").execute(HealHandler));
-    context.register_command(heal, "essentials.heal");
+    context.register_command(heal, "pumpkin-unified-core.essentials.heal");
 
     let feed = Command::new(&["feed".to_string()], "Feed a player")
         .then(string_arg("target").execute(FeedHandler));
-    context.register_command(feed, "essentials.feed");
+    context.register_command(feed, "pumpkin-unified-core.essentials.feed");
 
     let vanish = Command::new(&["vanish".to_string()], "Toggle vanish")
         .then(string_arg("target").execute(VanishHandler {
             moderation: moderation.clone(),
         }));
-    context.register_command(vanish, "essentials.vanish");
+    context.register_command(vanish, "pumpkin-unified-core.essentials.vanish");
 }

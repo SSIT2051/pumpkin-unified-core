@@ -134,12 +134,12 @@ pub fn register(context: &Context) {
             .then(string_arg("target").execute(GamemodeHandler { mode: GameMode::Spectator })),
     )
     .then(string_arg("mode").execute(GamemodeQueryHandler));
-    context.register_command(gamemode, "essentials.gamemode");
+    context.register_command(gamemode, "pumpkin-unified-core.essentials.gamemode");
 
     let alias = |name: &str, mode: GameMode| {
         let cmd = Command::new(&[name.to_string()], "Change gamemode")
             .then(string_arg("target").execute(GamemodeHandler { mode }));
-        context.register_command(cmd, "essentials.gamemode");
+        context.register_command(cmd, "pumpkin-unified-core.essentials.gamemode");
     };
     alias("gmc", GameMode::Creative);
     alias("gms", GameMode::Survival);

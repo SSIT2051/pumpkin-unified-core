@@ -171,24 +171,24 @@ pub fn register(tpa: Arc<Tpa>, context: &Context) {
             tpa: tpa.clone(),
             here: false,
         }));
-    context.register_command(tpa_cmd, "essentials.tpa");
+    context.register_command(tpa_cmd, "pumpkin-unified-core.essentials.tpa");
 
     let tpahere = Command::new(&["tpahere".to_string()], "Request a player teleport to you")
         .then(string_arg("target").execute(TpaHandler {
             tpa: tpa.clone(),
             here: true,
         }));
-    context.register_command(tpahere, "essentials.tpahere");
+    context.register_command(tpahere, "pumpkin-unified-core.essentials.tpahere");
 
     let tpaccept = Command::new(&["tpaccept".to_string()], "Accept a teleport request")
         .execute(TpAcceptHandler { tpa: tpa.clone() });
-    context.register_command(tpaccept, "essentials.tpaccept");
+    context.register_command(tpaccept, "pumpkin-unified-core.essentials.tpaccept");
 
     let tpdeny = Command::new(&["tpdeny".to_string()], "Deny a teleport request")
         .execute(TpDenyHandler { tpa: tpa.clone() });
-    context.register_command(tpdeny, "essentials.tpdeny");
+    context.register_command(tpdeny, "pumpkin-unified-core.essentials.tpdeny");
 
     let tptoggle = Command::new(&["tptoggle".to_string()], "Toggle teleport requests")
         .execute(TpToggleHandler { tpa });
-    context.register_command(tptoggle, "essentials.tptoggle");
+    context.register_command(tptoggle, "pumpkin-unified-core.essentials.tptoggle");
 }

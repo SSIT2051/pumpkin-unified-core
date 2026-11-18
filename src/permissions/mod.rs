@@ -256,8 +256,10 @@ impl Permissions {
     }
 
     /// Resolves whether `uuid` has `node`, considering group inheritance and
-    /// wildcards. Exact matches override wildcard matches; user nodes override
-    /// group nodes.
+    /// wildcards. `node` may be given in the fully namespaced form
+    /// (`pumpkin-unified-core.essentials.balance`) or the shorthand form
+    /// (`essentials.balance`); stored nodes may use either form as well.
+    /// Exact matches override wildcard matches; user nodes override group nodes.
     #[allow(dead_code)]
     pub fn has_permission(&self, uuid: &str, node: &str) -> bool {
         let user = match self.get_user(uuid) {
@@ -273,15 +275,15 @@ impl Permissions {
         // User nodes are appended last so they win over group nodes.
         perms.extend(user.permissions.iter().cloned());
 
+        let node_short = crate::utils::perm::shorthand(node);
+
         let mut exact: Option<bool> = None;
         let mut wildcard: Option<bool> = None;
         for perm in &perms {
-            if perm.node == node {
+            if perm.node == node || perm.node == node_short {
                 exact = Some(perm.value);
-            } else if let Some(prefix) = perm.node.strip_suffix(".*") {
-                if node.starts_with(prefix) {
-                    wildcard = Some(perm.value);
-                }
+            } else if crate::utils::perm::node_matches(&perm.node, node) {
+                wildcard = Some(perm.value);
             }
         }
 

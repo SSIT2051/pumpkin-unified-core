@@ -57,9 +57,9 @@ pub fn register(spawn: Arc<SpawnModule>, context: &Context) {
         .execute(SpawnHandler {
             spawn: spawn.clone(),
         });
-    context.register_command(spawn_cmd, "essentials.spawn");
+    context.register_command(spawn_cmd, "pumpkin-unified-core.essentials.spawn");
 
     let setspawn = Command::new(&["setspawn".to_string()], "Set the spawn point")
         .execute(SetSpawnHandler { spawn });
-    context.register_command(setspawn, "essentials.setspawn");
+    context.register_command(setspawn, "pumpkin-unified-core.essentials.setspawn");
 }

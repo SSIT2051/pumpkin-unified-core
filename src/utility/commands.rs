@@ -411,59 +411,59 @@ pub fn register(utility: Arc<Utility>, context: &Context) {
         .execute(AfkHandler {
             utility: utility.clone(),
         });
-    context.register_command(afk, "essentials.afk");
+    context.register_command(afk, "pumpkin-unified-core.essentials.afk");
 
     let rules = Command::new(&["rules".to_string()], "View server rules")
         .execute(RulesHandler {
             utility: utility.clone(),
         });
-    context.register_command(rules, "essentials.rules");
+    context.register_command(rules, "pumpkin-unified-core.essentials.rules");
 
     let motd = Command::new(&["motd".to_string()], "View message of the day")
         .execute(MotdHandler {
             utility: utility.clone(),
         });
-    context.register_command(motd, "essentials.motd");
+    context.register_command(motd, "pumpkin-unified-core.essentials.motd");
 
     let list = Command::new(&["list".to_string()], "List online players")
         .execute(ListHandler);
-    context.register_command(list, "essentials.list");
+    context.register_command(list, "pumpkin-unified-core.essentials.list");
 
     let whois = Command::new(&["whois".to_string()], "View player info")
         .then(string_arg("target").execute(WhoisHandler));
-    context.register_command(whois, "essentials.whois");
+    context.register_command(whois, "pumpkin-unified-core.essentials.whois");
 
     let speed = Command::new(&["speed".to_string()], "Set walk speed")
         .then(string_arg("speed").execute(SpeedHandler));
-    context.register_command(speed, "essentials.speed");
+    context.register_command(speed, "pumpkin-unified-core.essentials.speed");
 
     let compass = Command::new(&["compass".to_string()], "Show position")
         .execute(CompassHandler);
-    context.register_command(compass, "essentials.compass");
+    context.register_command(compass, "pumpkin-unified-core.essentials.compass");
 
     let top = Command::new(&["top".to_string()], "Teleport to top")
         .execute(TopHandler);
-    context.register_command(top, "essentials.top");
+    context.register_command(top, "pumpkin-unified-core.essentials.top");
 
     let seen = Command::new(&["seen".to_string()], "Check last seen")
         .then(string_arg("target").execute(SeenHandler {
             utility: utility.clone(),
         }));
-    context.register_command(seen, "essentials.seen");
+    context.register_command(seen, "pumpkin-unified-core.essentials.seen");
 
     let weather = Command::new(&["weather".to_string()], "Change weather")
         .then(string_arg("mode").execute(WeatherHandler));
-    context.register_command(weather, "essentials.weather");
+    context.register_command(weather, "pumpkin-unified-core.essentials.weather");
 
     let time = Command::new(&["time".to_string()], "Change time")
         .then(string_arg("mode").execute(TimeHandler));
-    context.register_command(time, "essentials.time");
+    context.register_command(time, "pumpkin-unified-core.essentials.time");
 
     let butcher = Command::new(&["butcher".to_string()], "Kill mobs")
         .execute(ButcherHandler);
-    context.register_command(butcher, "essentials.butcher");
+    context.register_command(butcher, "pumpkin-unified-core.essentials.butcher");
 
     let extinguish = Command::new(&["extinguish".to_string()], "Extinguish fires")
         .execute(ExtinguishHandler);
-    context.register_command(extinguish, "essentials.extinguish");
+    context.register_command(extinguish, "pumpkin-unified-core.essentials.extinguish");
 }

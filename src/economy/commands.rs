@@ -303,7 +303,7 @@ pub fn register(econ: Arc<Economy>, context: &Context) {
     .then(string_arg("target").execute(BalanceOthersHandler {
         econ: econ.clone(),
     }));
-    context.register_command(balance, "essentials.balance");
+    context.register_command(balance, "pumpkin-unified-core.essentials.balance");
 
     // /pay <target> <amount>
     let pay = Command::new(&["pay".to_string()], "Pay another player")
@@ -312,7 +312,7 @@ pub fn register(econ: Arc<Economy>, context: &Context) {
             string_arg("target")
                 .then(string_arg("amount").execute(PayHandler { econ: econ.clone() })),
         );
-    context.register_command(pay, "essentials.pay");
+    context.register_command(pay, "pumpkin-unified-core.essentials.pay");
 
     // /baltop
     let baltop = Command::new(
@@ -322,7 +322,7 @@ pub fn register(econ: Arc<Economy>, context: &Context) {
     .execute(BaltopHandler {
         econ: econ.clone(),
     });
-    context.register_command(baltop, "essentials.balancetop");
+    context.register_command(baltop, "pumpkin-unified-core.essentials.balancetop");
 
     // /eco <give|take|set> <target> <amount>
     let eco = Command::new(
@@ -348,5 +348,5 @@ pub fn register(econ: Arc<Economy>, context: &Context) {
                 .then(string_arg("amount").execute(EcoSetHandler { econ: econ.clone() })),
         ),
     );
-    context.register_command(eco, "essentials.eco");
+    context.register_command(eco, "pumpkin-unified-core.essentials.eco");
 }

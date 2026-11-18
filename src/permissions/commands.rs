@@ -656,5 +656,5 @@ pub fn register(perms: Arc<Permissions>, context: &Context) {
         .then(CommandNode::literal("sync").execute(SyncHandler))
         .then(CommandNode::literal("info").execute(InfoHandler));
 
-    context.register_command(command, "luckperms.admin");
+    context.register_command(command, "pumpkin-unified-core.luckperms.admin");
 }

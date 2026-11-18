@@ -92,7 +92,9 @@ impl Plugin for UnifiedPlugin {
 
 fn permission(node: &str, description: &str, default: PermissionDefault) -> Permission {
     Permission {
-        node: node.to_string(),
+        // PumpkinMC requires the plugin namespace prefix on every registered
+        // permission; call sites keep using short LuckPerms-style nodes.
+        node: crate::utils::perm::namespaced(node),
         description: description.to_string(),
         default,
         children: Vec::new(),
