@@ -33,6 +33,7 @@ set -uo pipefail
 pkill -INT -f "./pumpkin" || true
 sleep 4
 cd /root/pumpkin-server
+export PUMPKIN_CONFIG_DIR=/home/container/config
 nohup ./pumpkin > /tmp/pumpkin.log 2>&1 </dev/null &
 sleep 4
 RESTART

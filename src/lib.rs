@@ -55,7 +55,7 @@ impl Plugin for UnifiedPlugin {
     fn on_load(&self, context: Context) -> Result<()> {
         tracing::info!("Loading pumpkin-unified-core...");
 
-        // Load configuration.
+        // Load configuration from environment variables (PUC_ prefix).
         let config = Arc::new(Config::load());
         let data_folder = context.get_data_folder();
         let storage = Arc::new(Storage::new(&data_folder));

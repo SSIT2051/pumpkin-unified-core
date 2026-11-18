@@ -1,6 +1,5 @@
-use config::{Config as ConfigRs, File, FileFormat};
+use config::Config as ConfigRs;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -370,21 +369,16 @@ impl Default for EventsConfig {
 
 impl Config {
     pub fn load() -> Self {
-        let config_dir = std::env::var("PUMPKIN_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
-        let config_path = Path::new(&config_dir).join("pumpkin-unified-core");
-
-        let mut builder = ConfigRs::builder()
-            .add_source(File::from(config_path.join("config.default.toml")).format(FileFormat::Toml).required(false))
-            .add_source(File::from(config_path.join("config.default.yml")).format(FileFormat::Yaml).required(false))
-            .add_source(File::from(config_path.join("config.toml")).format(FileFormat::Toml).required(false))
-            .add_source(File::from(config_path.join("config.yml")).format(FileFormat::Yaml).required(false));
-
-        builder = builder.add_source(config::Environment::with_prefix("PUC"));
-
+        let mut builder = ConfigRs::builder();
+        
+        // Add environment variable source (PUC_ prefix)
+        builder = builder.add_source(config::Environment::with_prefix("PUC").separator("__"));
+        
         let config_rs = builder.build().expect("Failed to build configuration");
         
-        config_rs.try_deserialize().unwrap_or_else(|e| {
-            tracing::warn!("Failed to deserialize config, using defaults: {}", e);
+        // Try to deserialize from environment; fall back to defaults if no env vars set
+        config_rs.try_deserialize().unwrap_or_else(|_| {
+            tracing::debug!("No config environment variables set, using defaults");
             Self::default()
         })
     }
