@@ -209,13 +209,13 @@ pub fn register(chat: Arc<Chat>, context: &Context) {
         .then(string_arg("target").then(greedy_arg("message").execute(MsgHandler {
             chat: chat.clone(),
         })));
-    context.register_command(msg, "pumpkin-unified-core.essentials.msg");
+    context.register_command(msg, "pumpkin-unified-core:essentials.msg");
 
     let reply = Command::new(&["r".to_string(), "reply".to_string()], "Reply to a message")
         .then(greedy_arg("message").execute(ReplyHandler {
             chat: chat.clone(),
         }));
-    context.register_command(reply, "pumpkin-unified-core.essentials.reply");
+    context.register_command(reply, "pumpkin-unified-core:essentials.reply");
 
     let mail = Command::new(&["mail".to_string()], "Mail")
         .then(
@@ -225,13 +225,13 @@ pub fn register(chat: Arc<Chat>, context: &Context) {
                 }))),
         )
         .then(CommandNode::literal("read").execute(MailReadHandler { chat: chat.clone() }));
-    context.register_command(mail, "pumpkin-unified-core.essentials.mail");
+    context.register_command(mail, "pumpkin-unified-core:essentials.mail");
 
     let broadcast = Command::new(&["broadcast".to_string(), "bc".to_string()], "Broadcast a message")
         .then(greedy_arg("message").execute(BroadcastHandler));
-    context.register_command(broadcast, "pumpkin-unified-core.essentials.broadcast");
+    context.register_command(broadcast, "pumpkin-unified-core:essentials.broadcast");
 
     let broadcastworld = Command::new(&["broadcastworld".to_string()], "Broadcast to world")
         .then(greedy_arg("message").execute(BroadcastWorldHandler));
-    context.register_command(broadcastworld, "pumpkin-unified-core.essentials.broadcastworld");
+    context.register_command(broadcastworld, "pumpkin-unified-core:essentials.broadcastworld");
 }

@@ -154,19 +154,19 @@ pub fn register(kits: Arc<Kits>, context: &Context) {
         .then(string_arg("name").execute(KitHandler {
             kits: kits.clone(),
         }));
-    context.register_command(kit, "pumpkin-unified-core.essentials.kit");
+    context.register_command(kit, "pumpkin-unified-core:essentials.kit");
 
     let kits_list = Command::new(&["kits".to_string()], "List kits")
         .execute(KitsListHandler { kits: kits.clone() });
-    context.register_command(kits_list, "pumpkin-unified-core.essentials.kits");
+    context.register_command(kits_list, "pumpkin-unified-core:essentials.kits");
 
     let createkit = Command::new(&["createkit".to_string()], "Create a kit")
         .then(string_arg("name").then(string_arg("cooldown").execute(CreateKitHandler {
             kits: kits.clone(),
         })));
-    context.register_command(createkit, "pumpkin-unified-core.essentials.createkit");
+    context.register_command(createkit, "pumpkin-unified-core:essentials.createkit");
 
     let showkit = Command::new(&["showkit".to_string()], "Show kit contents")
         .then(string_arg("name").execute(ShowKitHandler { kits }));
-    context.register_command(showkit, "pumpkin-unified-core.essentials.showkit");
+    context.register_command(showkit, "pumpkin-unified-core:essentials.showkit");
 }

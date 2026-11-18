@@ -163,21 +163,21 @@ pub fn register(homes: Arc<Homes>, context: &Context) {
         .then(string_arg("name").execute(SetHomeHandler {
             homes: homes.clone(),
         }));
-    context.register_command(sethome, "pumpkin-unified-core.essentials.sethome");
+    context.register_command(sethome, "pumpkin-unified-core:essentials.sethome");
 
     let home = Command::new(&["home".to_string()], "Teleport to a home")
         .then(string_arg("name").execute(HomeHandler {
             homes: homes.clone(),
         }));
-    context.register_command(home, "pumpkin-unified-core.essentials.home");
+    context.register_command(home, "pumpkin-unified-core:essentials.home");
 
     let delhome = Command::new(&["delhome".to_string()], "Delete a home")
         .then(string_arg("name").execute(DelHomeHandler {
             homes: homes.clone(),
         }));
-    context.register_command(delhome, "pumpkin-unified-core.essentials.delhome");
+    context.register_command(delhome, "pumpkin-unified-core:essentials.delhome");
 
     let homes_list = Command::new(&["homes".to_string()], "List homes")
         .execute(HomesListHandler { homes });
-    context.register_command(homes_list, "pumpkin-unified-core.essentials.homes");
+    context.register_command(homes_list, "pumpkin-unified-core:essentials.homes");
 }

@@ -146,21 +146,21 @@ pub fn register(warps: Arc<Warps>, context: &Context) {
         .then(string_arg("name").execute(WarpHandler {
             warps: warps.clone(),
         }));
-    context.register_command(warp, "pumpkin-unified-core.essentials.warp");
+    context.register_command(warp, "pumpkin-unified-core:essentials.warp");
 
     let setwarp = Command::new(&["setwarp".to_string()], "Create a warp")
         .then(string_arg("name").execute(SetWarpHandler {
             warps: warps.clone(),
         }));
-    context.register_command(setwarp, "pumpkin-unified-core.essentials.setwarp");
+    context.register_command(setwarp, "pumpkin-unified-core:essentials.setwarp");
 
     let delwarp = Command::new(&["delwarp".to_string()], "Delete a warp")
         .then(string_arg("name").execute(DelWarpHandler {
             warps: warps.clone(),
         }));
-    context.register_command(delwarp, "pumpkin-unified-core.essentials.delwarp");
+    context.register_command(delwarp, "pumpkin-unified-core:essentials.delwarp");
 
     let warps_list = Command::new(&["warps".to_string()], "List warps")
         .execute(WarpsListHandler { warps });
-    context.register_command(warps_list, "pumpkin-unified-core.essentials.warps");
+    context.register_command(warps_list, "pumpkin-unified-core:essentials.warps");
 }
