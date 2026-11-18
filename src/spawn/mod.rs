@@ -39,4 +39,8 @@ impl SpawnModule {
     pub fn spawn_location(&self) -> Option<&crate::config::LocationConfig> {
         self.config.spawn_location.as_ref()
     }
+
+    pub fn config(&self) -> &SpawnConfig {
+        &self.config
+    }
 }

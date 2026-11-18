@@ -127,4 +127,8 @@ impl Moderation {
     pub fn max_tempmute_duration(&self) -> u64 {
         self.config.max_tempmute_duration
     }
+
+    pub fn is_god(&self, uuid: &str) -> bool {
+        self.state(uuid).god
+    }
 }

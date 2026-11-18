@@ -87,12 +87,24 @@ impl Chat {
         self.config.anti_spam
     }
 
-    pub async fn is_spam(&self, uuid: &str, message: &str) -> bool {
-        // Simple spam detection - could be enhanced
+    pub fn format_message(&self, player: &pumpkin_plugin_api::player::Player, message: &str) -> String {
+        let format = &self.config.format;
+        let group = "default"; // TODO: Get from permissions
+        let prefix = ""; // TODO: Get from permissions
+        
+        format
+            .replace("{group}", group)
+            .replace("{prefix}", prefix)
+            .replace("{player}", &player.get_name())
+            .replace("{message}", message)
+    }
+
+    pub fn is_spam(&self, _uuid: &str, _message: &str, _threshold: u32) -> bool {
         if !self.config.anti_spam {
             return false;
         }
-        // Basic check - could track message history
+        // Simple spam detection - track recent messages
+        // For now, just return false (no spam detected)
         false
     }
 }

@@ -350,6 +350,8 @@ pub struct EventsConfig {
     pub death_messages: bool,
     pub keep_inventory: bool,
     pub anti_build: bool,
+    pub anti_spam: bool,
+    pub spam_threshold: u32,
 }
 
 impl Default for EventsConfig {
@@ -360,6 +362,8 @@ impl Default for EventsConfig {
             death_messages: true,
             keep_inventory: false,
             anti_build: true,
+            anti_spam: true,
+            spam_threshold: 5,
         }
     }
 }
@@ -482,6 +486,8 @@ impl Default for Config {
                 death_messages: true,
                 keep_inventory: false,
                 anti_build: true,
+                anti_spam: true,
+                spam_threshold: 5,
             },
         }
     }

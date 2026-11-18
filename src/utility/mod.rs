@@ -64,7 +64,7 @@ impl Utility {
         None
     }
 
-    pub fn set_last_seen(&self, uuid: &str, name: &str) {
+    pub fn set_last_seen(&self, uuid: &str, _name: &str) {
         if let Some(mut data) = self.get_player(uuid) {
             data.last_seen = crate::utils::time::now_timestamp();
             self.storage.set("players", uuid, &data);
@@ -113,5 +113,12 @@ impl Utility {
 
     pub fn max_players(&self) -> u32 {
         self.config.max_players
+    }
+
+    pub fn update_activity(&self, uuid: &str) {
+        if let Some(mut data) = self.get_player(uuid) {
+            data.last_seen = crate::utils::time::now_timestamp();
+            self.storage.set("players", uuid, &data);
+        }
     }
 }

@@ -24,7 +24,6 @@ use chat::Chat;
 use config::Config;
 use economy::Economy;
 use events::EventModule;
-use gamemode::Gamemode;
 use homes::Homes;
 use kits::Kits;
 use moderation::Moderation;
@@ -79,7 +78,6 @@ impl Plugin for UnifiedPlugin {
             homes.clone(),
             tpa.clone(),
             kits.clone(),
-            moderation.clone(),
             permissions.clone(),
             spawn.clone(),
             utility.clone(),
