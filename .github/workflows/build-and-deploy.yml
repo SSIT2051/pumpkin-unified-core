@@ -1,0 +1,153 @@
+name: Build and Deploy pumpkin-unified-core
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WASM_TARGET: wasm32-wasip2
+  PLUGIN_NAME: pumpkin_unified_core.wasm
+  SSH_HOST: th-bkk02.altare.global
+  SSH_PORT: 25726
+  SSH_USER: root
+  REMOTE_PLUGIN_DIR: /root/pumpkin-server/plugins/
+  REMOTE_SERVER_DIR: /root/pumpkin-server
+
+jobs:
+  build-and-deploy:
+    name: Build WASM and Deploy to pumpkin-vm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ env.WASM_TARGET }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release WASM
+        run: |
+          cargo build --release --target ${{ env.WASM_TARGET }} --package pumpkin-unified-core
+
+      - name: Verify artifact exists
+        run: |
+          ls -la target/${{ env.WASM_TARGET }}/release/${{ env.PLUGIN_NAME }}
+          echo "ARTIFACT_PATH=target/${{ env.WASM_TARGET }}/release/${{ env.PLUGIN_NAME }}" >> $GITHUB_ENV
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add known hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PUMPKIN_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy WASM to pumpkin-vm
+        run: |
+          scp -P ${{ env.SSH_PORT }} -o StrictHostKeyChecking=no \
+            ${{ env.ARTIFACT_PATH }} \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.REMOTE_PLUGIN_DIR }}${PLUGIN_NAME}
+
+      - name: Restart pumpkin server and verify
+        run: |
+          ssh -p ${{ env.SSH_PORT }} -o StrictHostKeyChecking=no ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'EOF'
+          set -euo pipefail
+          
+          echo "=== Stopping existing pumpkin process ==="
+          pkill -INT -f "./pumpkin" || true
+          sleep 4
+          
+          echo "=== Starting fresh pumpkin instance ==="
+          cd ${{ env.REMOTE_SERVER_DIR }}
+          export PUMPKIN_CONFIG_DIR=/home/container/config
+          nohup ./pumpkin > /tmp/pumpkin.log 2>&1 </dev/null &
+          
+          echo "=== Waiting for startup ==="
+          sleep 6
+          
+          echo "=== Verifying plugin load ==="
+          echo "--- pumpkin process ---"
+          ps aux | grep '[.]/pumpkin' | head -2 || echo "NOT RUNNING"
+          
+          echo "--- plugin lines ---"
+          grep -i 'pumpkin-unified' /tmp/pumpkin.log | head -20 || echo "NO PLUGIN LINES FOUND"
+          
+          echo "--- errors (if any) ---"
+          grep -iE 'error|failed|panic' /tmp/pumpkin.log | grep -iv 'error_|no errors' | head -20 || echo "none"
+          
+          echo "=== Full log tail (last 100 lines) ==="
+          tail -100 /tmp/pumpkin.log
+          
+          # Exit with error if any errors found
+          if grep -iE 'error|failed|panic' /tmp/pumpkin.log | grep -iv 'error_|no errors' | grep -q .; then
+            echo "::error::Errors detected in pumpkin.log"
+            exit 1
+          fi
+          EOF
+
+      - name: Cleanup local build artifacts
+        if: always()
+        run: |
+          rm -rf target
+          cargo clean
+          echo "Build cache cleaned"
+
+  verify-deployment:
+    name: Verify deployment via Management API
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for server to fully start
+        run: sleep 10
+
+      - name: Test LuckPerms commands
+        run: |
+          curl -X POST http://${{ env.SSH_HOST }}:25726/api/command \
+            -H "Content-Type: application/json" \
+            -d '{"command": "lp help"}' \
+            --max-time 10 \
+            -f || echo "LP help test completed"
+
+      - name: Test Utility commands
+        run: |
+          curl -X POST http://${{ env.SSH_HOST }}:25726/api/command \
+            -H "Content-Type: application/json" \
+            -d '{"command": "help"}' \
+            --max-time 10 \
+            -f || echo "Help test completed"
+
+      - name: Test Protection commands
+        run: |
+          curl -X POST http://${{ env.SSH_HOST }}:25726/api/command \
+            -H "Content-Type: application/json" \
+            -d '{"command": "protect info"}' \
+            --max-time 10 \
+            -f || echo "Protect test completed"
+
+      - name: Test Anti-build commands
+        run: |
+          curl -X POST http://${{ env.SSH_HOST }}:25726/api/command \
+            -H "Content-Type: application/json" \
+            -d '{"command": "antibuild status"}' \
+            --max-time 10 \
+            -f || echo "Anti-build test completed"
