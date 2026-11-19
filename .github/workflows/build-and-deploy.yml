@@ -51,6 +51,13 @@ jobs:
           ls -la target/${{ env.WASM_TARGET }}/release/${{ env.PLUGIN_NAME }}
           echo "ARTIFACT_PATH=target/${{ env.WASM_TARGET }}/release/${{ env.PLUGIN_NAME }}" >> $GITHUB_ENV
 
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpkin-unified-core-wasm
+          path: ${{ env.ARTIFACT_PATH }}
+          retention-days: 1
+
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
